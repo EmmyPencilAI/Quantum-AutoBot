@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: {uid} (Wallet address)
+    // Fields:
+    //   - uid: string (required, immutable)
+    //   - username: string (required)
+    //   - avatar: string (optional)
+    //   - totalProfit: number (required)
+    //   - strategy: string (optional)
+    //   - region: string (optional)
+    //   - lastActive: string (required)
+    //
+    // Collection: posts
+    // Document ID: {postId}
+    // Fields:
+    //   - authorUid: string (required, immutable)
+    //   - authorName: string (required)
+    //   - authorAvatar: string (optional)
+    //   - content: string (required)
+    //   - likes: number (required)
+    //   - createdAt: string (required, immutable)
+    //
+    // Collection: trades
+    // Document ID: {tradeId}
+    // Fields:
+    //   - uid: string (required, immutable)
+    //   - pair: string (required)
+    //   - strategy: string (required)
+    //   - pnl: number (required)
+    //   - timestamp: string (required, immutable)
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'username', 'totalProfit', 'lastActive']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
+             data.totalProfit is number &&
+             data.lastActive is string;
+    }
+
+    function isValidPost(data) {
+      return data.keys().hasAll(['authorUid', 'authorName', 'content', 'likes', 'createdAt']) &&
+             data.authorUid is string && data.authorUid == request.auth.uid &&
+             data.authorName is string && data.authorName.size() > 0 && data.authorName.size() < 50 &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 1000 &&
+             data.likes is number &&
+             data.createdAt is string;
+    }
+
+    function isValidTrade(data) {
+      return data.keys().hasAll(['uid', 'pair', 'strategy', 'pnl', 'timestamp']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.pair is string &&
+             data.strategy is string &&
+             data.pnl is number &&
+             data.timestamp is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(uid) && isValidUser(request.resource.data);
+      allow update: if isOwner(uid) && isValidUser(request.resource.data) && 
+                    request.resource.data.uid == resource.data.uid;
+    }
+
+    match /posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidPost(request.resource.data);
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == resource.data.authorUid && isValidPost(request.resource.data) && request.resource.data.authorUid == resource.data.authorUid) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) && request.resource.data.likes == resource.data.likes + 1)
+      );
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.authorUid;
+    }
+
+    match /trades/{tradeId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.uid;
+      allow create: if isAuthenticated() && isValidTrade(request.resource.data);
+    }
+  }
+}

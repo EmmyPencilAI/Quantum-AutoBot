@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile data for leaderboard and community.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Wallet address" },
+        "username": { "type": "string", "description": "Display name" },
+        "avatar": { "type": "string", "description": "Web3 avatar URL" },
+        "totalProfit": { "type": "number", "description": "Total USDT profit" },
+        "strategy": { "type": "string", "description": "Active strategy" },
+        "region": { "type": "string", "description": "User region" },
+        "lastActive": { "type": "string", "format": "date-time", "description": "Last activity timestamp" }
+      },
+      "required": ["uid", "username"]
+    },
+    "Post": {
+      "title": "Community Post",
+      "description": "A post in the community feed.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "content": { "type": "string" },
+        "likes": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorUid", "content", "createdAt"]
+    },
+    "Trade": {
+      "title": "Trade History",
+      "description": "History of trades for a user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "pair": { "type": "string" },
+        "strategy": { "type": "string" },
+        "pnl": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "pair", "pnl", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "Community posts"
+    },
+    "/trades/{tradeId}": {
+      "schema": "Trade",
+      "description": "Trade history"
+    }
+  }
+}
