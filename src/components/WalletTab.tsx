@@ -8,9 +8,12 @@ interface WalletTabProps {
   account: string | null;
   balance: string;
   connectWallet: () => void;
+  notify: (message: string, type?: "success" | "error" | "info") => void;
+  showPrompt: (title: string, message: string, placeholder: string, onConfirm: (value: string) => void) => void;
+  showAlert: (title: string, message: string) => void;
 }
 
-export function WalletTab({ account, balance, connectWallet }: WalletTabProps) {
+export function WalletTab({ account, balance, connectWallet, notify, showPrompt, showAlert }: WalletTabProps) {
   const [isApproving, setIsApproving] = useState(false);
   const [isFunding, setIsFunding] = useState(false);
 
@@ -24,11 +27,12 @@ export function WalletTab({ account, balance, connectWallet }: WalletTabProps) {
       
       const amount = ethers.parseUnits("1000000", 18); // Approve a large amount for convenience
       const tx = await usdtContract.approve(CONFIG.CONTRACT_ADDRESS, amount);
+      notify("Approval transaction sent...", "info");
       await tx.wait();
-      alert("USDT Approved Successfully!");
+      notify("USDT Approved Successfully!", "success");
     } catch (error: any) {
       console.error("Approval failed:", error);
-      alert(`Approval failed: ${error.message || "Unknown error"}`);
+      notify(`Approval failed: ${error.message || "Unknown error"}`, "error");
     } finally {
       setIsApproving(false);
     }
@@ -36,25 +40,30 @@ export function WalletTab({ account, balance, connectWallet }: WalletTabProps) {
 
   const handleFund = async () => {
     if (!account) return connectWallet();
-    const amountStr = prompt("Enter USDT amount to fund (e.g., 100):");
-    if (!amountStr || isNaN(parseFloat(amountStr))) return;
     
-    setIsFunding(true);
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      const quantumContract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, QUANTUM_ABI, signer);
+    showPrompt("Fund Trading", "Enter USDT amount to fund (e.g., 100):", "100", async (amountStr) => {
+      if (!amountStr || isNaN(parseFloat(amountStr))) {
+        return notify("Invalid amount entered", "error");
+      }
       
-      const amount = ethers.parseUnits(amountStr, 18);
-      const tx = await quantumContract.deposit(amount);
-      await tx.wait();
-      alert("Trading Funded Successfully!");
-    } catch (error: any) {
-      console.error("Funding failed:", error);
-      alert(`Funding failed: ${error.message || "Unknown error"}`);
-    } finally {
-      setIsFunding(false);
-    }
+      setIsFunding(true);
+      try {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await provider.getSigner();
+        const quantumContract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, QUANTUM_ABI, signer);
+        
+        const amount = ethers.parseUnits(amountStr, 18);
+        const tx = await quantumContract.deposit(amount);
+        notify("Funding transaction sent...", "info");
+        await tx.wait();
+        notify("Trading Funded Successfully!", "success");
+      } catch (error: any) {
+        console.error("Funding failed:", error);
+        notify(`Funding failed: ${error.message || "Unknown error"}`, "error");
+      } finally {
+        setIsFunding(false);
+      }
+    });
   };
 
   return (

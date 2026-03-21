@@ -12,15 +12,31 @@ import { Community } from "./components/Community";
 import { Settings } from "./components/Settings";
 import { Markets } from "./components/Markets";
 import { motion, AnimatePresence } from "motion/react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, X, CheckCircle2, AlertCircle, Info as InfoIcon } from "lucide-react";
 
 declare global {
   interface Window {
     ethereum?: any;
+    TradingView?: any;
   }
 }
 
 export type Tab = "wallet" | "trading" | "leaderboard" | "community" | "settings" | "markets";
+
+interface Notification {
+  id: string;
+  type: "success" | "error" | "info";
+  message: string;
+}
+
+interface ModalConfig {
+  title: string;
+  message: string;
+  onConfirm?: (value?: string) => void;
+  onCancel?: () => void;
+  type: "alert" | "confirm" | "prompt";
+  placeholder?: string;
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("wallet");
@@ -29,6 +45,30 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [showRiskWarning, setShowRiskWarning] = useState(true);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [modal, setModal] = useState<ModalConfig | null>(null);
+  const [promptValue, setPromptValue] = useState("");
+
+  const notify = (message: string, type: "success" | "error" | "info" = "info") => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setNotifications(prev => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  };
+
+  const showAlert = (title: string, message: string) => {
+    setModal({ title, message, type: "alert" });
+  };
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setModal({ title, message, type: "confirm", onConfirm });
+  };
+
+  const showPrompt = (title: string, message: string, placeholder: string, onConfirm: (value: string) => void) => {
+    setPromptValue("");
+    setModal({ title, message, type: "prompt", placeholder, onConfirm });
+  };
 
   // Wallet Connection
   const connectWallet = async () => {
@@ -38,16 +78,16 @@ export default function App() {
         const accounts = await provider.send("eth_requestAccounts", []);
         setAccount(accounts[0]);
         
-        // Sign in to Firebase anonymously or with wallet (simplified for this dApp)
-        // In a real app, use a wallet-based auth flow
         if (!auth.currentUser) {
           await signInAnonymously(auth);
         }
-      } catch (error) {
+        notify("Wallet connected successfully!", "success");
+      } catch (error: any) {
         console.error("Wallet connection failed:", error);
+        notify(error.message || "Wallet connection failed", "error");
       }
     } else {
-      alert("Please open this dApp inside a Web3 wallet browser (MetaMask, TokenPocket, etc.)");
+      showAlert("Wallet Not Found", "Please open this dApp inside a Web3 wallet browser (MetaMask, TokenPocket, etc.)");
     }
   };
 
@@ -105,19 +145,19 @@ export default function App() {
   const renderTab = () => {
     switch (activeTab) {
       case "wallet":
-        return <WalletTab account={account} balance={balance} connectWallet={connectWallet} />;
+        return <WalletTab account={account} balance={balance} connectWallet={connectWallet} notify={notify} showPrompt={showPrompt} showAlert={showAlert} />;
       case "trading":
-        return <TradingDashboard account={account} balance={balance} />;
+        return <TradingDashboard account={account} balance={balance} showAlert={showAlert} notify={notify} />;
       case "leaderboard":
         return <Leaderboard />;
       case "community":
-        return <Community userProfile={userProfile} />;
+        return <Community userProfile={userProfile} notify={notify} />;
       case "settings":
-        return <Settings userProfile={userProfile} />;
+        return <Settings userProfile={userProfile} showConfirm={showConfirm} notify={notify} />;
       case "markets":
         return <Markets />;
       default:
-        return <WalletTab account={account} balance={balance} connectWallet={connectWallet} />;
+        return <WalletTab account={account} balance={balance} connectWallet={connectWallet} notify={notify} showPrompt={showPrompt} showAlert={showAlert} />;
     }
   };
 
@@ -149,9 +189,103 @@ export default function App() {
 
       <Layout activeTab={activeTab} setActiveTab={setActiveTab} account={account}>
         <div className="pt-16 pb-24 max-w-lg mx-auto px-4 min-h-screen flex flex-col">
-          {renderTab()}
+          {activeTab === "wallet" && <WalletTab account={account} balance={balance} connectWallet={connectWallet} notify={notify} showPrompt={showPrompt} showAlert={showAlert} />}
+          {activeTab === "trading" && <TradingDashboard account={account} balance={balance} showAlert={showAlert} notify={notify} />}
+          {activeTab === "leaderboard" && <Leaderboard />}
+          {activeTab === "community" && <Community userProfile={userProfile} notify={notify} />}
+          {activeTab === "settings" && <Settings userProfile={userProfile} showConfirm={showConfirm} notify={notify} />}
+          {activeTab === "markets" && <Markets />}
         </div>
       </Layout>
+
+      {/* Notifications */}
+      <div className="fixed bottom-24 left-4 right-4 z-[100] pointer-events-none flex flex-col gap-2">
+        <AnimatePresence>
+          {notifications.map(n => (
+            <motion.div
+              key={n.id}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className={`pointer-events-auto p-4 rounded-2xl shadow-2xl flex items-center gap-3 border backdrop-blur-xl ${
+                n.type === "success" ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
+                n.type === "error" ? "bg-red-500/20 border-red-500/30 text-red-400" :
+                "bg-blue-500/20 border-blue-500/30 text-blue-400"
+              }`}
+            >
+              {n.type === "success" ? <CheckCircle2 size={18} /> : 
+               n.type === "error" ? <AlertCircle size={18} /> : 
+               <InfoIcon size={18} />}
+              <p className="text-sm font-medium">{n.message}</p>
+              <button onClick={() => setNotifications(prev => prev.filter(item => item.id !== n.id))} className="ml-auto opacity-50 hover:opacity-100">
+                <X size={16} />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Custom Modal */}
+      <AnimatePresence>
+        {modal && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => modal.type === "alert" && setModal(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-sm bg-[#1a1a1a] border border-white/10 rounded-[32px] p-8 shadow-2xl"
+            >
+              <h3 className="text-xl font-bold mb-2">{modal.title}</h3>
+              <p className="text-white/60 text-sm mb-6 leading-relaxed">{modal.message}</p>
+              
+              {modal.type === "prompt" && (
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder={modal.placeholder}
+                  value={promptValue}
+                  onChange={(e) => setPromptValue(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-lg font-bold focus:outline-none focus:border-emerald-500/50 mb-6"
+                />
+              )}
+
+              <div className="flex gap-3">
+                {modal.type !== "alert" && (
+                  <button
+                    onClick={() => {
+                      modal.onCancel?.();
+                      setModal(null);
+                    }}
+                    className="flex-1 bg-white/5 hover:bg-white/10 text-white font-bold py-4 rounded-2xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    if (modal.type === "prompt") {
+                      modal.onConfirm?.(promptValue);
+                    } else {
+                      modal.onConfirm?.();
+                    }
+                    setModal(null);
+                  }}
+                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-4 rounded-2xl transition-all shadow-lg shadow-emerald-500/20"
+                >
+                  {modal.type === "alert" ? "OK" : "Confirm"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

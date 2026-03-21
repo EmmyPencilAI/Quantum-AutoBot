@@ -12,6 +12,39 @@ interface Coin {
   market_cap: number;
 }
 
+const TradingViewWidget: React.FC<{ symbol: string }> = ({ symbol }) => {
+  const containerId = "tradingview_widget_" + Math.random().toString(36).substring(2, 9);
+
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.async = true;
+    script.onload = () => {
+      if (window.TradingView) {
+        new window.TradingView.widget({
+          "autosize": true,
+          "symbol": symbol,
+          "interval": "D",
+          "timezone": "Etc/UTC",
+          "theme": "dark",
+          "style": "1",
+          "locale": "en",
+          "toolbar_bg": "#f1f3f6",
+          "enable_publishing": false,
+          "allow_symbol_change": true,
+          "container_id": containerId,
+        });
+      }
+    };
+    document.head.appendChild(script);
+    return () => {
+      // Cleanup script if needed, though tv.js is usually fine to stay
+    };
+  }, [symbol, containerId]);
+
+  return <div id={containerId} className="w-full h-full" />;
+};
+
 export const Markets: React.FC = () => {
   const [coins, setCoins] = useState<Coin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,14 +91,9 @@ export const Markets: React.FC = () => {
         </div>
       </div>
 
-      {/* TradingView Widget Placeholder */}
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-4 h-64 flex items-center justify-center relative overflow-hidden">
-        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-emerald-500/20 via-transparent to-transparent" />
-        <div className="text-center z-10">
-          <TrendingUp className="w-12 h-12 text-emerald-500 mx-auto mb-2 opacity-50" />
-          <p className="text-white/60 text-sm">TradingView Chart Integration</p>
-          <p className="text-xs text-white/40 mt-1">Live data for {filteredCoins[0]?.name || 'BTC'}/USDT</p>
-        </div>
+      {/* TradingView Widget */}
+      <div className="bg-[#131722] border border-white/10 rounded-3xl p-1 h-[400px] relative overflow-hidden shadow-2xl">
+        <TradingViewWidget symbol={search ? `BINANCE:${search.toUpperCase()}USDT` : "BINANCE:BTCUSDT"} />
       </div>
 
       <div className="grid gap-4">

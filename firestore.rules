@@ -47,12 +47,19 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "emmanuelobed877@gmail.com" && request.auth.token.email_verified == true));
+    }
+
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'username', 'totalProfit', 'lastActive']) &&
-             data.uid is string && data.uid.size() > 0 &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
              data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
              data.totalProfit is number &&
-             data.lastActive is string;
+             data.lastActive is string &&
+             (!('role' in data) || data.role in ['admin', 'user']);
     }
 
     function isValidPost(data) {
@@ -67,8 +74,8 @@ service cloud.firestore {
     function isValidTrade(data) {
       return data.keys().hasAll(['uid', 'pair', 'strategy', 'pnl', 'timestamp']) &&
              data.uid is string && data.uid == request.auth.uid &&
-             data.pair is string &&
-             data.strategy is string &&
+             data.pair is string && data.pair.size() < 20 &&
+             data.strategy is string && data.strategy.size() < 50 &&
              data.pnl is number &&
              data.timestamp is string;
     }
@@ -79,9 +86,11 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if isAuthenticated();
-      allow create: if isOwner(uid) && isValidUser(request.resource.data);
-      allow update: if isOwner(uid) && isValidUser(request.resource.data) && 
-                    request.resource.data.uid == resource.data.uid;
+      allow create: if isOwner(uid) && isValidUser(request.resource.data) && 
+                    (!('role' in request.resource.data) || request.resource.data.role == 'user' || isAdmin());
+      allow update: if (isOwner(uid) || isAdmin()) && isValidUser(request.resource.data) && 
+                    request.resource.data.uid == resource.data.uid &&
+                    (request.resource.data.role == resource.data.role || isAdmin());
     }
 
     match /posts/{postId} {

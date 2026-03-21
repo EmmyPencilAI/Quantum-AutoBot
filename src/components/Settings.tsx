@@ -6,11 +6,16 @@ import { motion, AnimatePresence } from "motion/react";
 
 interface SettingsProps {
   userProfile: any;
+  showConfirm: (title: string, message: string, onConfirm: () => void) => void;
+  notify: (message: string, type?: "success" | "error" | "info") => void;
 }
 
-const AVATAR_SEEDS = Array.from({ length: 54 }, (_, i) => `avatar_${i + 1}`);
+const AVATAR_STYLES = [
+  'adventurer', 'avataaars', 'bottts', 'pixel-art', 'micah', 'miniavs', 
+  'notionists', 'open-peeps', 'personas', 'shapes', 'lorelei', 'big-smile'
+];
 
-export function Settings({ userProfile }: SettingsProps) {
+export function Settings({ userProfile, showConfirm, notify }: SettingsProps) {
   const [username, setUsername] = useState(userProfile?.username || "");
   const [isUpdating, setIsUpdating] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -23,8 +28,10 @@ export function Settings({ userProfile }: SettingsProps) {
     try {
       const userRef = doc(db, "users", userProfile.uid);
       await updateDoc(userRef, updates);
+      notify("Profile updated!", "success");
     } catch (error) {
       console.error("Failed to update profile:", error);
+      notify("Update failed", "error");
     } finally {
       setIsUpdating(false);
     }
@@ -35,9 +42,8 @@ export function Settings({ userProfile }: SettingsProps) {
     handleUpdate({ username });
   };
 
-  const selectAvatar = (seed: string) => {
-    const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`;
-    handleUpdate({ avatar: avatarUrl });
+  const selectAvatar = (url: string) => {
+    handleUpdate({ avatar: url });
     setShowAvatarPicker(false);
   };
 
@@ -54,10 +60,14 @@ export function Settings({ userProfile }: SettingsProps) {
   };
 
   const handleDisconnect = () => {
-    if (window.confirm("Are you sure you want to disconnect?")) {
+    showConfirm("Disconnect Wallet", "Are you sure you want to disconnect? This will reload the application.", () => {
       window.location.reload();
-    }
+    });
   };
+
+  const avatars = AVATAR_STYLES.flatMap(style => 
+    Array.from({ length: 5 }, (_, i) => `https://api.dicebear.com/7.x/${style}/svg?seed=${style}_${i}`)
+  ).slice(0, 60);
 
   return (
     <div className="space-y-6 py-4">
@@ -174,16 +184,15 @@ export function Settings({ userProfile }: SettingsProps) {
                 </button>
               </div>
               <div className="p-6 overflow-y-auto grid grid-cols-3 sm:grid-cols-4 gap-4">
-                {AVATAR_SEEDS.map((seed) => {
-                  const url = `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`;
+                {avatars.map((url, index) => {
                   const isSelected = userProfile?.avatar === url;
                   return (
                     <button 
-                      key={seed}
-                      onClick={() => selectAvatar(seed)}
+                      key={index}
+                      onClick={() => selectAvatar(url)}
                       className={`relative aspect-square rounded-2xl bg-white/5 border-2 transition-all hover:scale-105 ${isSelected ? 'border-emerald-500' : 'border-transparent hover:border-white/20'}`}
                     >
-                      <img src={url} alt={seed} className="w-full h-full p-2" referrerPolicy="no-referrer" />
+                      <img src={url} alt={`Avatar ${index}`} className="w-full h-full p-2" referrerPolicy="no-referrer" />
                       {isSelected && (
                         <div className="absolute -top-1 -right-1 bg-emerald-500 text-black p-1 rounded-full shadow-lg">
                           <Check size={10} strokeWidth={4} />

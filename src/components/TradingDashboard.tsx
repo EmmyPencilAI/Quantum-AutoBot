@@ -7,9 +7,11 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 interface TradingDashboardProps {
   account: string | null;
   balance: string;
+  showAlert: (title: string, message: string) => void;
+  notify: (message: string, type?: "success" | "error" | "info") => void;
 }
 
-export function TradingDashboard({ account, balance }: TradingDashboardProps) {
+export function TradingDashboard({ account, balance, showAlert, notify }: TradingDashboardProps) {
   const [isTrading, setIsTrading] = useState(false);
   const [strategy, setStrategy] = useState(CONFIG.STRATEGIES[0]);
   const [pair, setPair] = useState(CONFIG.PAIRS[0]);
@@ -36,21 +38,26 @@ export function TradingDashboard({ account, balance }: TradingDashboardProps) {
   }, [isTrading, strategy]);
 
   const handleStart = () => {
-    if (!account) return alert("Connect wallet first");
-    if (!amount || parseFloat(amount) <= 0) return alert("Enter valid amount");
+    if (!account) return notify("Connect wallet first", "error");
+    if (!amount || parseFloat(amount) <= 0) return notify("Enter valid amount", "error");
     setIsTrading(true);
+    notify("Auto-trading started!", "success");
   };
 
   const handleStop = async () => {
-    // Simulate settlement
-    const response = await fetch("/api/trading/simulate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ strategy, principal: parseFloat(amount), duration: 60 })
-    });
-    const data = await response.json();
-    alert(`Trading Stopped!\nFinal PnL: ${data.profit.toFixed(2)} USDT\nYour Share: ${(data.profit > 0 ? data.profit / 2 : data.profit).toFixed(2)} USDT`);
-    setIsTrading(false);
+    try {
+      notify("Settling trades...", "info");
+      const response = await fetch("/api/trading/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy, principal: parseFloat(amount), duration: 60 })
+      });
+      const data = await response.json();
+      showAlert("Trading Settled", `Final PnL: ${data.profit.toFixed(2)} USDT\nYour Share: ${(data.profit > 0 ? data.profit / 2 : data.profit).toFixed(2)} USDT`);
+      setIsTrading(false);
+    } catch (error) {
+      notify("Settlement failed", "error");
+    }
   };
 
   return (

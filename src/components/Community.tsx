@@ -7,9 +7,10 @@ import { formatDistanceToNow } from "date-fns";
 
 interface CommunityProps {
   userProfile: any;
+  notify: (message: string, type?: "success" | "error" | "info") => void;
 }
 
-export function Community({ userProfile }: CommunityProps) {
+export function Community({ userProfile, notify }: CommunityProps) {
   const [posts, setPosts] = useState<any[]>([]);
   const [newPost, setNewPost] = useState("");
   const [isPosting, setIsPosting] = useState(false);
@@ -18,6 +19,8 @@ export function Community({ userProfile }: CommunityProps) {
     const q = query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(50));
     const unsub = onSnapshot(q, (snap) => {
       setPosts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      console.error("Posts snapshot error:", error);
     });
     return () => unsub();
   }, []);
@@ -35,8 +38,10 @@ export function Community({ userProfile }: CommunityProps) {
         createdAt: new Date().toISOString()
       });
       setNewPost("");
+      notify("Post shared!", "success");
     } catch (error) {
       console.error("Failed to post:", error);
+      notify("Failed to share post", "error");
     } finally {
       setIsPosting(false);
     }
@@ -50,6 +55,7 @@ export function Community({ userProfile }: CommunityProps) {
       });
     } catch (error) {
       console.error("Failed to like:", error);
+      notify("Failed to like post", "error");
     }
   };
 
