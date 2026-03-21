@@ -10,6 +10,7 @@ import { WalletTab } from "./components/WalletTab";
 import { Leaderboard } from "./components/Leaderboard";
 import { Community } from "./components/Community";
 import { Settings } from "./components/Settings";
+import { Markets } from "./components/Markets";
 import { motion, AnimatePresence } from "motion/react";
 import { AlertTriangle } from "lucide-react";
 
@@ -19,7 +20,7 @@ declare global {
   }
 }
 
-export type Tab = "wallet" | "trading" | "leaderboard" | "community" | "settings";
+export type Tab = "wallet" | "trading" | "leaderboard" | "community" | "settings" | "markets";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("wallet");
@@ -113,6 +114,8 @@ export default function App() {
         return <Community userProfile={userProfile} />;
       case "settings":
         return <Settings userProfile={userProfile} />;
+      case "markets":
+        return <Markets />;
       default:
         return <WalletTab account={account} balance={balance} connectWallet={connectWallet} />;
     }

@@ -1,5 +1,5 @@
 import React from "react";
-import { Wallet, TrendingUp, Trophy, Users, Settings as SettingsIcon } from "lucide-react";
+import { Wallet, TrendingUp, Trophy, Users, Settings as SettingsIcon, BarChart3 } from "lucide-react";
 import { Tab } from "../App";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -18,6 +18,7 @@ interface LayoutProps {
 export function Layout({ children, activeTab, setActiveTab, account }: LayoutProps) {
   const navItems = [
     { id: "wallet", icon: Wallet, label: "Wallet" },
+    { id: "markets", icon: BarChart3, label: "Markets" },
     { id: "trading", icon: TrendingUp, label: "Trading" },
     { id: "leaderboard", icon: Trophy, label: "Leaderboard" },
     { id: "community", icon: Users, label: "Community" },

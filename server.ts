@@ -57,6 +57,21 @@ async function startServer() {
     });
   });
 
+  // Crypto Prices Endpoint
+  app.get("/api/prices", async (req, res) => {
+    try {
+      const apiKey = process.env.COINGECKO_API_KEY;
+      const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false${apiKey ? `&x_cg_demo_api_key=${apiKey}` : ""}`;
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      console.error("Failed to fetch prices:", error);
+      res.status(500).json({ error: "Failed to fetch prices" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -1,6 +1,8 @@
-import React from "react";
-import { Wallet, ArrowRight, ShieldCheck, Zap } from "lucide-react";
+import React, { useState } from "react";
+import { Wallet, ArrowRight, ShieldCheck, Zap, Loader2 } from "lucide-react";
 import { motion } from "motion/react";
+import { ethers } from "ethers";
+import { CONFIG, USDT_ABI, QUANTUM_ABI } from "../config";
 
 interface WalletTabProps {
   account: string | null;
@@ -9,6 +11,52 @@ interface WalletTabProps {
 }
 
 export function WalletTab({ account, balance, connectWallet }: WalletTabProps) {
+  const [isApproving, setIsApproving] = useState(false);
+  const [isFunding, setIsFunding] = useState(false);
+
+  const handleApprove = async () => {
+    if (!account) return connectWallet();
+    setIsApproving(true);
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const usdtContract = new ethers.Contract(CONFIG.USDT_ADDRESS, USDT_ABI, signer);
+      
+      const amount = ethers.parseUnits("1000000", 18); // Approve a large amount for convenience
+      const tx = await usdtContract.approve(CONFIG.CONTRACT_ADDRESS, amount);
+      await tx.wait();
+      alert("USDT Approved Successfully!");
+    } catch (error: any) {
+      console.error("Approval failed:", error);
+      alert(`Approval failed: ${error.message || "Unknown error"}`);
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  const handleFund = async () => {
+    if (!account) return connectWallet();
+    const amountStr = prompt("Enter USDT amount to fund (e.g., 100):");
+    if (!amountStr || isNaN(parseFloat(amountStr))) return;
+    
+    setIsFunding(true);
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const quantumContract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, QUANTUM_ABI, signer);
+      
+      const amount = ethers.parseUnits(amountStr, 18);
+      const tx = await quantumContract.deposit(amount);
+      await tx.wait();
+      alert("Trading Funded Successfully!");
+    } catch (error: any) {
+      console.error("Funding failed:", error);
+      alert(`Funding failed: ${error.message || "Unknown error"}`);
+    } finally {
+      setIsFunding(false);
+    }
+  };
+
   return (
     <div className="space-y-6 py-4">
       <motion.div 
@@ -69,10 +117,14 @@ export function WalletTab({ account, balance, connectWallet }: WalletTabProps) {
 
       <div className="space-y-4">
         <h3 className="text-sm font-bold text-white/60 uppercase tracking-widest px-2">Quick Actions</h3>
-        <button className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between group hover:bg-white/10 transition-all">
+        <button 
+          onClick={handleApprove}
+          disabled={isApproving}
+          className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between group hover:bg-white/10 transition-all disabled:opacity-50"
+        >
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-blue-500/20 rounded-2xl flex items-center justify-center">
-              <ArrowRight className="text-blue-500" size={24} />
+              {isApproving ? <Loader2 className="text-blue-500 animate-spin" size={24} /> : <ArrowRight className="text-blue-500" size={24} />}
             </div>
             <div className="text-left">
               <p className="font-bold">Approve USDT</p>
@@ -82,10 +134,14 @@ export function WalletTab({ account, balance, connectWallet }: WalletTabProps) {
           <ArrowRight className="text-white/20 group-hover:text-white/60 transition-all" size={20} />
         </button>
         
-        <button className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between group hover:bg-white/10 transition-all">
+        <button 
+          onClick={handleFund}
+          disabled={isFunding}
+          className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between group hover:bg-white/10 transition-all disabled:opacity-50"
+        >
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-emerald-500/20 rounded-2xl flex items-center justify-center">
-              <Zap className="text-emerald-500" size={24} />
+              {isFunding ? <Loader2 className="text-emerald-500 animate-spin" size={24} /> : <Zap className="text-emerald-500" size={24} />}
             </div>
             <div className="text-left">
               <p className="font-bold">Fund Trading</p>

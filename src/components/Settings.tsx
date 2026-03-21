@@ -1,30 +1,61 @@
 import React, { useState } from "react";
 import { db } from "../firebase";
 import { doc, updateDoc } from "firebase/firestore";
-import { User, Camera, Bell, Shield, LogOut } from "lucide-react";
-import { motion } from "motion/react";
+import { User, Camera, Bell, Shield, LogOut, X, Check } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 
 interface SettingsProps {
   userProfile: any;
 }
 
+const AVATAR_SEEDS = Array.from({ length: 54 }, (_, i) => `avatar_${i + 1}`);
+
 export function Settings({ userProfile }: SettingsProps) {
   const [username, setUsername] = useState(userProfile?.username || "");
   const [isUpdating, setIsUpdating] = useState(false);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [notifications, setNotifications] = useState(userProfile?.notifications ?? true);
+  const [privacyMode, setPrivacyMode] = useState(userProfile?.privacyMode ?? false);
 
-  const handleUpdate = async () => {
-    if (!username.trim() || !userProfile) return;
+  const handleUpdate = async (updates: any) => {
+    if (!userProfile) return;
     setIsUpdating(true);
     try {
       const userRef = doc(db, "users", userProfile.uid);
-      await updateDoc(userRef, {
-        username: username
-      });
-      alert("Profile updated!");
+      await updateDoc(userRef, updates);
     } catch (error) {
       console.error("Failed to update profile:", error);
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleUsernameSave = () => {
+    if (!username.trim() || username === userProfile?.username) return;
+    handleUpdate({ username });
+  };
+
+  const selectAvatar = (seed: string) => {
+    const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`;
+    handleUpdate({ avatar: avatarUrl });
+    setShowAvatarPicker(false);
+  };
+
+  const toggleNotifications = () => {
+    const newVal = !notifications;
+    setNotifications(newVal);
+    handleUpdate({ notifications: newVal });
+  };
+
+  const togglePrivacy = () => {
+    const newVal = !privacyMode;
+    setPrivacyMode(newVal);
+    handleUpdate({ privacyMode: newVal });
+  };
+
+  const handleDisconnect = () => {
+    if (window.confirm("Are you sure you want to disconnect?")) {
+      window.location.reload();
     }
   };
 
@@ -38,7 +69,10 @@ export function Settings({ userProfile }: SettingsProps) {
             className="w-24 h-24 rounded-3xl bg-white/5 border-2 border-white/10 p-1"
             referrerPolicy="no-referrer"
           />
-          <button className="absolute -bottom-2 -right-2 bg-emerald-500 text-black p-2 rounded-xl shadow-lg hover:bg-emerald-400 transition-all">
+          <button 
+            onClick={() => setShowAvatarPicker(true)}
+            className="absolute -bottom-2 -right-2 bg-emerald-500 text-black p-2 rounded-xl shadow-lg hover:bg-emerald-400 transition-all"
+          >
             <Camera size={16} />
           </button>
         </div>
@@ -59,18 +93,21 @@ export function Settings({ userProfile }: SettingsProps) {
           </div>
 
           <button 
-            onClick={handleUpdate}
+            onClick={handleUsernameSave}
             disabled={isUpdating || username === userProfile?.username}
             className="w-full bg-white text-black font-bold py-4 rounded-2xl hover:bg-white/90 disabled:opacity-50 transition-all"
           >
-            Save Changes
+            {isUpdating ? "Saving..." : "Save Changes"}
           </button>
         </div>
 
         <div className="space-y-2">
           <h3 className="text-sm font-bold text-white/60 uppercase tracking-widest px-2">Preferences</h3>
           <div className="bg-white/5 border border-white/10 rounded-3xl divide-y divide-white/5">
-            <div className="p-5 flex items-center justify-between">
+            <button 
+              onClick={toggleNotifications}
+              className="w-full p-5 flex items-center justify-between hover:bg-white/5 transition-colors text-left"
+            >
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center">
                   <Bell className="text-blue-500" size={20} />
@@ -80,12 +117,15 @@ export function Settings({ userProfile }: SettingsProps) {
                   <p className="text-xs text-white/40">Get alerts for trade profits</p>
                 </div>
               </div>
-              <div className="w-12 h-6 bg-emerald-500 rounded-full relative">
-                <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
+              <div className={`w-12 h-6 rounded-full relative transition-colors ${notifications ? 'bg-emerald-500' : 'bg-white/10'}`}>
+                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${notifications ? 'right-1' : 'left-1'}`} />
               </div>
-            </div>
+            </button>
             
-            <div className="p-5 flex items-center justify-between">
+            <button 
+              onClick={togglePrivacy}
+              className="w-full p-5 flex items-center justify-between hover:bg-white/5 transition-colors text-left"
+            >
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 bg-purple-500/20 rounded-xl flex items-center justify-center">
                   <Shield className="text-purple-500" size={20} />
@@ -95,18 +135,68 @@ export function Settings({ userProfile }: SettingsProps) {
                   <p className="text-xs text-white/40">Hide my address on leaderboard</p>
                 </div>
               </div>
-              <div className="w-12 h-6 bg-white/10 rounded-full relative">
-                <div className="absolute left-1 top-1 w-4 h-4 bg-white/40 rounded-full shadow-sm" />
+              <div className={`w-12 h-6 rounded-full relative transition-colors ${privacyMode ? 'bg-emerald-500' : 'bg-white/10'}`}>
+                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${privacyMode ? 'right-1' : 'left-1'}`} />
               </div>
-            </div>
+            </button>
           </div>
         </div>
 
-        <button className="w-full bg-red-500/10 text-red-500 font-bold py-4 rounded-2xl flex items-center justify-center gap-2 hover:bg-red-500/20 transition-all border border-red-500/20">
+        <button 
+          onClick={handleDisconnect}
+          className="w-full bg-red-500/10 text-red-500 font-bold py-4 rounded-2xl flex items-center justify-center gap-2 hover:bg-red-500/20 transition-all border border-red-500/20"
+        >
           <LogOut size={18} />
           Disconnect Wallet
         </button>
       </div>
+
+      <AnimatePresence>
+        {showAvatarPicker && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAvatarPicker(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 100 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 100 }}
+              className="relative w-full max-w-lg bg-[#141414] border border-white/10 rounded-t-[40px] sm:rounded-[40px] overflow-hidden flex flex-col max-h-[80vh]"
+            >
+              <div className="p-6 border-b border-white/5 flex items-center justify-between">
+                <h3 className="text-lg font-bold">Choose Avatar</h3>
+                <button onClick={() => setShowAvatarPicker(false)} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="p-6 overflow-y-auto grid grid-cols-3 sm:grid-cols-4 gap-4">
+                {AVATAR_SEEDS.map((seed) => {
+                  const url = `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`;
+                  const isSelected = userProfile?.avatar === url;
+                  return (
+                    <button 
+                      key={seed}
+                      onClick={() => selectAvatar(seed)}
+                      className={`relative aspect-square rounded-2xl bg-white/5 border-2 transition-all hover:scale-105 ${isSelected ? 'border-emerald-500' : 'border-transparent hover:border-white/20'}`}
+                    >
+                      <img src={url} alt={seed} className="w-full h-full p-2" referrerPolicy="no-referrer" />
+                      {isSelected && (
+                        <div className="absolute -top-1 -right-1 bg-emerald-500 text-black p-1 rounded-full shadow-lg">
+                          <Check size={10} strokeWidth={4} />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
