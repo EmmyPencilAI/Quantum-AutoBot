@@ -56,10 +56,10 @@ export function WalletTab({ account, balance, connectWallet }: WalletTabProps) {
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
           <p className="text-xs text-white/40 font-medium mb-1">Network</p>
-          <p className="text-sm font-bold flex items-center gap-2">
+          <div className="text-sm font-bold flex items-center gap-2">
             <div className="w-2 h-2 bg-yellow-500 rounded-full" />
             BNB Chain
-          </p>
+          </div>
         </div>
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
           <p className="text-xs text-white/40 font-medium mb-1">Status</p>
