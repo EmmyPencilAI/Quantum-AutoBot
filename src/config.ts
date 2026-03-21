@@ -2,8 +2,8 @@ export const CONFIG = {
   CHAIN_ID: 56, // BNB Chain Mainnet
   RPC_URL: "https://bsc-dataseed.binance.org/",
   USDT_ADDRESS: "0x55d398326f99059fF775485246999027B3197955", // USDT on BSC
-  CONTRACT_ADDRESS: "0x0000000000000000000000000000000000000000", // Replace with deployed address
-  TREASURY_ADDRESS: "0x0000000000000000000000000000000000000000", // Replace with treasury address
+  CONTRACT_ADDRESS: "0xBebdB8db1DDc42ED3270dB48c757447e6E4Aa8a2", // Replace with deployed address
+  TREASURY_ADDRESS: "0xBebdB8db1DDc42ED3270dB48c757447e6E4Aa8a2", // Replace with treasury address
   STRATEGIES: ["Aggressive", "Momentum", "Scalping", "Conservative"],
   PAIRS: ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT"]
 };
