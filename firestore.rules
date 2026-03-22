@@ -65,6 +65,14 @@ service cloud.firestore {
              data.createdAt is string;
     }
 
+    function isValidTrade(data) {
+      return data.keys().hasAll(['uid', 'pair', 'pnl', 'timestamp']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.pair is string &&
+             data.pnl is number &&
+             data.timestamp is string;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================

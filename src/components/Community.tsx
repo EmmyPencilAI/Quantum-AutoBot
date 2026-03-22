@@ -26,7 +26,11 @@ export function Community({ userProfile, notify }: CommunityProps) {
   }, []);
 
   const handlePost = async () => {
-    if (!newPost.trim() || !userProfile) return;
+    if (!newPost.trim()) return;
+    if (!userProfile) {
+      notify("Please connect your wallet to post", "error");
+      return;
+    }
     setIsPosting(true);
     const path = "posts";
     try {

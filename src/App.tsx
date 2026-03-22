@@ -245,6 +245,7 @@ export default function App() {
             updateBalance={updateBalance}
             refreshProfile={fetchProfile}
             setActiveTab={setActiveTab}
+            userProfile={userProfile}
           />
         );
       case "leaderboard":

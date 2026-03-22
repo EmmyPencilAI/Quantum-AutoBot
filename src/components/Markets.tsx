@@ -21,6 +21,13 @@ const TradingViewWidget: React.FC<{ symbol: string }> = ({ symbol }) => {
     script.async = true;
     script.onload = () => {
       if (window.TradingView) {
+        let origin = "";
+        try {
+          origin = window.location.origin;
+        } catch (e) {
+          console.warn("Could not access window.location.origin for TradingView widget", e);
+        }
+
         new window.TradingView.widget({
           "autosize": true,
           "symbol": symbol,
@@ -33,7 +40,7 @@ const TradingViewWidget: React.FC<{ symbol: string }> = ({ symbol }) => {
           "enable_publishing": false,
           "allow_symbol_change": true,
           "container_id": containerId,
-          // Removed origin to avoid cross-origin frame access errors in iframe
+          ...(origin ? { "origin": origin } : {})
         });
       }
     };

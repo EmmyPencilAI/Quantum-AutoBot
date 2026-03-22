@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { TrendingUp, TrendingDown, Play, Square, Info, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { CONFIG } from "../config";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, collection, addDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 
@@ -27,6 +27,7 @@ interface TradingDashboardProps {
   updateBalance: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   setActiveTab: (tab: any) => void;
+  userProfile: any;
 }
 
 export function TradingDashboard({ 
@@ -49,7 +50,8 @@ export function TradingDashboard({
   history,
   updateBalance,
   refreshProfile,
-  setActiveTab
+  setActiveTab,
+  userProfile
 }: TradingDashboardProps) {
 
   const handleStart = () => {
@@ -96,9 +98,9 @@ export function TradingDashboard({
       const finalProfit = data.profit; // Server already calculated the 50/50 split
       const txMsg = data.txHash ? `\n\nTransaction: ${data.txHash.slice(0, 10)}...` : "";
       
-      // Update Firestore total profit for leaderboard
+      // Update Firestore total profit and trade history
       try {
-        if (account) {
+        if (userProfile?.uid) {
           const profileRef = doc(db, "users", userProfile.uid);
           const profileSnap = await getDoc(profileRef);
           if (profileSnap.exists()) {
@@ -107,11 +109,23 @@ export function TradingDashboard({
               totalProfit: currentTotalProfit + finalProfit,
               lastActive: new Date().toISOString()
             });
+            
+            // Save trade history to Firestore
+            const tradesRef = collection(db, "trades");
+            await addDoc(tradesRef, {
+              uid: userProfile.uid,
+              pair: pair,
+              strategy: strategy,
+              pnl: data.totalProfit, // Total profit before split
+              userShare: finalProfit, // User's 50% share
+              timestamp: new Date().toISOString()
+            });
+
             await refreshProfile();
           }
         }
       } catch (firestoreError) {
-        console.error("Failed to update total profit in Firestore:", firestoreError);
+        console.error("Failed to update Firestore data:", firestoreError);
       }
 
       showAlert("Trading Settled", `Final PnL: ${data.totalProfit.toFixed(2)} USDT\nYour Share (50%): ${finalProfit.toFixed(2)} USDT\n\nFunds have been returned to your wallet.${txMsg}`);

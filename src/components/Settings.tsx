@@ -24,7 +24,10 @@ export function Settings({ userProfile, showConfirm, notify, refreshProfile }: S
   const [privacyMode, setPrivacyMode] = useState(userProfile?.privacyMode ?? false);
 
   const handleUpdate = async (updates: any) => {
-    if (!userProfile) return;
+    if (!userProfile) {
+      notify("Please connect your wallet to update settings", "error");
+      return;
+    }
     setIsUpdating(true);
     try {
       const profileRef = doc(db, "users", userProfile.uid);

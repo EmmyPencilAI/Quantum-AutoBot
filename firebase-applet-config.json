@@ -1,10 +1,10 @@
 {
-  "projectId": "gen-lang-client-0854563460",
-  "appId": "1:1075233307607:web:31bf5f93dae5d39bb8e992",
-  "apiKey": "AIzaSyDMrq2-i0v90HwRwqRVxHDd8bivDzVfUEI",
-  "authDomain": "gen-lang-client-0854563460.firebaseapp.com",
+  "projectId": "quantum-finance-b2f56",
+  "appId": "1:108274715417:web:73fdda246fd7f4eb9cd388",
+  "apiKey": "AIzaSyB1jNMvVFqq79GSA_wjINn0yZFoN8FX7L4",
+  "authDomain": "quantum-finance-b2f56.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-53dc4e76-1309-4a66-9b2b-d955a3bf936f",
-  "storageBucket": "gen-lang-client-0854563460.firebasestorage.app",
-  "messagingSenderId": "1075233307607",
+  "storageBucket": "quantum-finance-b2f56.firebasestorage.app",
+  "messagingSenderId": "108274715417",
   "measurementId": ""
 }
