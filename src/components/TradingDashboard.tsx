@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { TrendingUp, TrendingDown, Play, Square, Info, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { CONFIG } from "../config";
+import { getSupabaseProfile, updateSupabaseProfile } from "../supabase";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 
 interface TradingDashboardProps {
@@ -23,6 +24,8 @@ interface TradingDashboardProps {
   setPair: (val: string) => void;
   history: any[];
   updateBalance: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
+  setActiveTab: (tab: any) => void;
 }
 
 export function TradingDashboard({ 
@@ -43,7 +46,9 @@ export function TradingDashboard({
   pair,
   setPair,
   history,
-  updateBalance
+  updateBalance,
+  refreshProfile,
+  setActiveTab
 }: TradingDashboardProps) {
 
   const handleStart = () => {
@@ -87,11 +92,20 @@ export function TradingDashboard({
         return;
       }
       
-      // Simulate returning balance + profit
-      const finalProfit = data.profit > 0 ? data.profit * 0.8 : data.profit; // 80/20 split
+      const finalProfit = data.profit; // Server already calculated the 50/50 split
       const txMsg = data.txHash ? `\n\nTransaction: ${data.txHash.slice(0, 10)}...` : "";
       
-      showAlert("Trading Settled", `Final PnL: ${data.profit.toFixed(2)} USDT\nYour Share: ${finalProfit.toFixed(2)} USDT\n\nFunds have been returned to your wallet.${txMsg}`);
+      // Update Supabase total profit for leaderboard
+      try {
+        const currentProfile = await getSupabaseProfile(account.toLowerCase());
+        const newTotalProfit = (currentProfile?.totalProfit || 0) + finalProfit;
+        await updateSupabaseProfile(account.toLowerCase(), { totalProfit: newTotalProfit });
+        await refreshProfile();
+      } catch (supabaseError) {
+        console.error("Failed to update total profit in Supabase:", supabaseError);
+      }
+
+      showAlert("Trading Settled", `Final PnL: ${data.totalProfit.toFixed(2)} USDT\nYour Share (50%): ${finalProfit.toFixed(2)} USDT\n\nFunds have been returned to your wallet.${txMsg}`);
       
       setIsTrading(false);
       setPnl(0);
@@ -99,6 +113,7 @@ export function TradingDashboard({
       
       setTimeout(async () => {
         await updateBalance();
+        setActiveTab("leaderboard");
       }, 2000);
       
     } catch (error: any) {
@@ -265,7 +280,7 @@ export function TradingDashboard({
       <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-4 flex gap-3">
         <Info className="text-amber-500 shrink-0" size={18} />
         <p className="text-[11px] text-amber-200/60 leading-relaxed">
-          Profits are split 80/20 between the user and the Quantum Treasury. Settlement is processed on-chain upon stopping the trade.
+          Profits are split 50/50 between the user and the Quantum Treasury. Settlement is processed on-chain upon stopping the trade.
         </p>
       </div>
     </div>

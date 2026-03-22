@@ -59,9 +59,13 @@ async function startServer() {
 
     const finalBalanceVal = principal * multiplier;
     const profit = finalBalanceVal - principal;
-    const finalBalanceFormatted = isNaN(finalBalanceVal) ? 0 : Math.max(0, finalBalanceVal);
+    
+    // 50/50 profit split: user gets principal + 50% of profit (if profit > 0)
+    const userShareOfProfit = profit > 0 ? profit * 0.5 : profit;
+    const userFinalBalance = principal + userShareOfProfit;
+    const finalBalanceFormatted = isNaN(userFinalBalance) ? 0 : Math.max(0, userFinalBalance);
 
-    console.log(`Simulation: Strategy=${strategy}, Principal=${principal}, Multiplier=${multiplier}, Final=${finalBalanceFormatted}`);
+    console.log(`Simulation: Strategy=${strategy}, Principal=${principal}, Multiplier=${multiplier}, Profit=${profit}, UserShare=${userShareOfProfit}, Final=${finalBalanceFormatted}`);
 
     let txHash = null;
     let error = null;
@@ -92,7 +96,8 @@ async function startServer() {
 
     res.json({
       finalBalance: finalBalanceFormatted,
-      profit: Math.max(-principal, profit),
+      profit: userShareOfProfit, // Return the user's share of profit
+      totalProfit: profit, // Return the total profit generated
       txHash,
       error,
       timestamp: new Date().toISOString()

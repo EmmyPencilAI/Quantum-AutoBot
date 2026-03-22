@@ -167,26 +167,27 @@ export default function App() {
   }, []);
 
   // Fetch User Profile (Supabase)
-  useEffect(() => {
+  const fetchProfile = useCallback(async () => {
     if (account) {
-      const fetchProfile = async () => {
-        try {
-          let profile = await getSupabaseProfile(account.toLowerCase());
-          if (!profile) {
-            profile = await updateSupabaseProfile(account.toLowerCase(), {
-              username: `User_${account.slice(2, 6)}`,
-              totalProfit: 0,
-              avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${account}`
-            });
-          }
-          setUserProfile(profile);
-        } catch (error) {
-          console.error("Supabase profile error:", error);
+      try {
+        let profile = await getSupabaseProfile(account.toLowerCase());
+        if (!profile) {
+          profile = await updateSupabaseProfile(account.toLowerCase(), {
+            username: `User_${account.slice(2, 6)}`,
+            totalProfit: 0,
+            avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${account}`
+          });
         }
-      };
-      fetchProfile();
+        setUserProfile(profile);
+      } catch (error) {
+        console.error("Supabase profile error:", error);
+      }
     }
   }, [account]);
+
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
 
   // Fetch Balance
   const updateBalance = useCallback(async () => {
@@ -233,6 +234,8 @@ export default function App() {
             setPair={setTradingPair}
             history={tradingHistory}
             updateBalance={updateBalance}
+            refreshProfile={fetchProfile}
+            setActiveTab={setActiveTab}
           />
         );
       case "leaderboard":
@@ -240,7 +243,7 @@ export default function App() {
       case "community":
         return <Community userProfile={userProfile} notify={notify} />;
       case "settings":
-        return <Settings userProfile={userProfile} showConfirm={showConfirm} notify={notify} />;
+        return <Settings userProfile={userProfile} showConfirm={showConfirm} notify={notify} refreshProfile={fetchProfile} />;
       case "markets":
         return <Markets />;
       default:
