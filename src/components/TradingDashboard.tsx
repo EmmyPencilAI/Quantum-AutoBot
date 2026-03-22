@@ -54,25 +54,52 @@ export function TradingDashboard({
   };
 
   const handleStop = async () => {
+    if (!account) return notify("Connect wallet first", "error");
+    
     try {
       notify("Settling trades...", "info");
       const response = await fetch("/api/trading/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ strategy, principal: parseFloat(amount), duration: 60 })
+        body: JSON.stringify({ 
+          strategy, 
+          principal: parseFloat(amount), 
+          duration: 60,
+          account: account.toLowerCase()
+        })
       });
+      
+      if (!response.ok) {
+        throw new Error("Server error during settlement");
+      }
+      
       const data = await response.json();
+      
+      if (data.error) {
+        notify(`Settlement error: ${data.error}`, "error");
+        // Even if on-chain fails, we might want to stop the UI trading state
+        // but it's safer to let the user retry if it's a real contract issue.
+        return;
+      }
       
       // Simulate returning balance + profit
       const finalProfit = data.profit > 0 ? data.profit / 2 : data.profit;
-      showAlert("Trading Settled", `Final PnL: ${data.profit.toFixed(2)} USDT\nYour Share: ${finalProfit.toFixed(2)} USDT\n\nFunds have been returned to your wallet.`);
+      const txMsg = data.txHash ? `\n\nTransaction: ${data.txHash.slice(0, 10)}...` : "";
+      
+      showAlert("Trading Settled", `Final PnL: ${data.profit.toFixed(2)} USDT\nYour Share: ${finalProfit.toFixed(2)} USDT\n\nFunds have been returned to your wallet.${txMsg}`);
       
       setIsTrading(false);
       setPnl(0);
       setChartData([]);
-      await updateBalance();
-    } catch (error) {
-      notify("Settlement failed", "error");
+      
+      // Wait a bit for blockchain to update before refreshing balance
+      setTimeout(async () => {
+        await updateBalance();
+      }, 2000);
+      
+    } catch (error: any) {
+      console.error("Settlement failed:", error);
+      notify(`Settlement failed: ${error.message || "Unknown error"}`, "error");
     }
   };
 
@@ -86,7 +113,7 @@ export function TradingDashboard({
       </div>
 
       {/* Chart Section */}
-      <div className="bg-white/5 border border-white/10 rounded-3xl p-4 h-64 relative overflow-hidden">
+      <div className="bg-white/5 border border-white/10 rounded-3xl p-3 sm:p-4 h-56 sm:h-64 relative overflow-hidden">
         <div className="absolute top-4 left-4 z-10">
           <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Live Performance</p>
           <div className="flex items-center gap-2">
@@ -119,8 +146,8 @@ export function TradingDashboard({
       </div>
 
       {/* Controls */}
-      <div className="bg-white/5 border border-white/10 rounded-3xl p-6 space-y-6">
-        <div className="grid grid-cols-2 gap-4">
+      <div className="bg-white/5 border border-white/10 rounded-3xl p-4 sm:p-6 space-y-4 sm:space-y-6">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest px-1">Trading Pair</label>
             <div className="relative">
@@ -194,7 +221,7 @@ export function TradingDashboard({
       <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-4 flex gap-3">
         <Info className="text-amber-500 shrink-0" size={18} />
         <p className="text-[11px] text-amber-200/60 leading-relaxed">
-          Profits are split 50/50 between the user and the Quantum Treasury. Settlement is processed on-chain upon stopping the trade.
+          Profits are split 80/20 between the user and the Quantum Treasury. Settlement is processed on-chain upon stopping the trade.
         </p>
       </div>
     </div>

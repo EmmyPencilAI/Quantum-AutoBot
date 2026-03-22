@@ -71,7 +71,7 @@ export function WalletTab({ account, balance, connectWallet, notify, showPrompt,
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-gradient-to-br from-emerald-500/20 to-blue-500/10 border border-white/10 rounded-3xl p-8 relative overflow-hidden"
+        className="bg-gradient-to-br from-emerald-500/20 to-blue-500/10 border border-white/10 rounded-3xl p-6 sm:p-8 relative overflow-hidden"
       >
         <div className="absolute top-0 right-0 p-4 opacity-10">
           <Zap size={120} />

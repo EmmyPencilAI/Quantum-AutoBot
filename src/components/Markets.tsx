@@ -77,14 +77,14 @@ export const Markets: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-20">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-white">Market Overview</h2>
-        <div className="relative">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h2 className="text-xl sm:text-2xl font-bold text-white">Market Overview</h2>
+        <div className="relative w-full sm:w-auto">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
           <input
             type="text"
             placeholder="Search coins..."
-            className="bg-white/5 border border-white/10 rounded-full py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 w-48"
+            className="bg-white/5 border border-white/10 rounded-full py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 w-full sm:w-48"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -92,7 +92,7 @@ export const Markets: React.FC = () => {
       </div>
 
       {/* TradingView Widget */}
-      <div className="bg-[#131722] border border-white/10 rounded-3xl p-1 h-[400px] relative overflow-hidden shadow-2xl">
+      <div className="bg-[#131722] border border-white/10 rounded-3xl p-1 h-[300px] sm:h-[400px] relative overflow-hidden shadow-2xl">
         <TradingViewWidget symbol={search ? `BINANCE:${search.toUpperCase()}USDT` : "BINANCE:BTCUSDT"} />
       </div>
 

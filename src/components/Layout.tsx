@@ -68,7 +68,7 @@ export function Layout({ children, activeTab, setActiveTab, account }: LayoutPro
 
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#0a0a0a]/90 backdrop-blur-2xl border-t border-white/5 pb-safe max-w-lg mx-auto">
-        <div className="flex items-center justify-around h-20 px-2">
+        <div className="flex items-center justify-around h-20 px-1">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -77,15 +77,15 @@ export function Layout({ children, activeTab, setActiveTab, account }: LayoutPro
                 key={item.id}
                 onClick={() => setActiveTab(item.id as Tab)}
                 className={cn(
-                  "flex flex-col items-center justify-center gap-1.5 transition-all duration-300 relative px-4 py-2 rounded-2xl",
+                  "flex flex-col items-center justify-center gap-1 transition-all duration-300 relative px-2 sm:px-4 py-2 rounded-2xl min-w-[50px]",
                   isActive ? "text-emerald-500" : "text-white/40 hover:text-white/60"
                 )}
               >
                 {isActive && (
                   <div className="absolute inset-0 bg-emerald-500/5 rounded-2xl -z-10" />
                 )}
-                <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">{item.label}</span>
+                <Icon size={18} strokeWidth={isActive ? 2.5 : 2} className="sm:w-5 sm:h-5" />
+                <span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest truncate max-w-[60px]">{item.label}</span>
               </button>
             );
           })}

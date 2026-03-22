@@ -2,9 +2,21 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import { ethers } from "ethers";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Contract Config (Mirroring src/config.ts)
+const RPC_URL = "https://data-seed-prebsc-1-s1.binance.org:8545/";
+const CONTRACT_ADDRESS = "0x231B1A524f480a0285Ac6A093DEd1931D0A28f81";
+const QUANTUM_ABI = [
+  "function settle(address user, uint256 finalBalance) external",
+  "function userSessions(address user) view returns (uint256 principal, uint256 startTime, bool isActive)"
+];
 
 async function startServer() {
   const app = express();
@@ -12,10 +24,9 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Trading Engine Simulation
-  // In a real app, this would connect to Binance/Bybit APIs
-  app.post("/api/trading/simulate", (req, res) => {
-    const { strategy, principal, duration } = req.body;
+  // Trading Engine Simulation & Settlement
+  app.post("/api/trading/simulate", async (req, res) => {
+    const { strategy, principal, duration, account } = req.body;
     
     // Simple simulation logic based on strategy
     let multiplier = 1.0;
@@ -42,17 +53,41 @@ async function startServer() {
         multiplier = 1.0;
     }
 
-    // Simulate loss chance
     if (Math.random() < risk) {
-        multiplier *= (0.8 + Math.random() * 0.15); // significant loss
+        multiplier *= (0.8 + Math.random() * 0.15);
     }
 
-    const finalBalance = principal * multiplier;
-    const profit = finalBalance - principal;
+    const finalBalanceVal = principal * multiplier;
+    const profit = finalBalanceVal - principal;
+    const finalBalanceFormatted = Math.max(0, finalBalanceVal);
+
+    let txHash = null;
+    let error = null;
+
+    // Real On-Chain Settlement if Private Key is present
+    if (account && process.env.OWNER_PRIVATE_KEY) {
+      try {
+        const provider = new ethers.JsonRpcProvider(RPC_URL);
+        const wallet = new ethers.Wallet(process.env.OWNER_PRIVATE_KEY, provider);
+        const contract = new ethers.Contract(CONTRACT_ADDRESS, QUANTUM_ABI, wallet);
+        
+        // Convert to Wei (18 decimals)
+        const finalBalanceWei = ethers.parseUnits(finalBalanceFormatted.toFixed(18), 18);
+        
+        const tx = await contract.settle(account, finalBalanceWei);
+        txHash = tx.hash;
+        await tx.wait();
+      } catch (e: any) {
+        console.error("On-chain settlement failed:", e);
+        error = e.message;
+      }
+    }
 
     res.json({
-      finalBalance: Math.max(0, finalBalance),
+      finalBalance: finalBalanceFormatted,
       profit: Math.max(-principal, profit),
+      txHash,
+      error,
       timestamp: new Date().toISOString()
     });
   });
