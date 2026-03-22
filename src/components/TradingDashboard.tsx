@@ -9,37 +9,46 @@ interface TradingDashboardProps {
   balance: string;
   showAlert: (title: string, message: string) => void;
   notify: (message: string, type?: "success" | "error" | "info") => void;
+  isTrading: boolean;
+  setIsTrading: (val: boolean) => void;
+  pnl: number;
+  setPnl: (val: number | ((prev: number) => number)) => void;
+  chartData: any[];
+  setChartData: (val: any[] | ((prev: any[]) => any[])) => void;
+  amount: string;
+  setAmount: (val: string) => void;
+  strategy: string;
+  setStrategy: (val: string) => void;
+  pair: string;
+  setPair: (val: string) => void;
+  updateBalance: () => Promise<void>;
 }
 
-export function TradingDashboard({ account, balance, showAlert, notify }: TradingDashboardProps) {
-  const [isTrading, setIsTrading] = useState(false);
-  const [strategy, setStrategy] = useState(CONFIG.STRATEGIES[0]);
-  const [pair, setPair] = useState(CONFIG.PAIRS[0]);
-  const [amount, setAmount] = useState("");
-  const [pnl, setPnl] = useState(0);
-  const [chartData, setChartData] = useState<any[]>([]);
-
-  useEffect(() => {
-    let interval: any;
-    if (isTrading) {
-      interval = setInterval(() => {
-        const change = (Math.random() * 2 - 0.9) * (strategy === "Aggressive" ? 2 : 1);
-        setPnl(prev => prev + change);
-        setChartData(prev => [
-          ...prev.slice(-19),
-          { time: new Date().toLocaleTimeString(), value: (prev[prev.length - 1]?.value || 0) + change }
-        ]);
-      }, 3000);
-    } else {
-      setPnl(0);
-      setChartData([]);
-    }
-    return () => clearInterval(interval);
-  }, [isTrading, strategy]);
+export function TradingDashboard({ 
+  account, 
+  balance, 
+  showAlert, 
+  notify,
+  isTrading,
+  setIsTrading,
+  pnl,
+  setPnl,
+  chartData,
+  setChartData,
+  amount,
+  setAmount,
+  strategy,
+  setStrategy,
+  pair,
+  setPair,
+  updateBalance
+}: TradingDashboardProps) {
 
   const handleStart = () => {
     if (!account) return notify("Connect wallet first", "error");
     if (!amount || parseFloat(amount) <= 0) return notify("Enter valid amount", "error");
+    if (parseFloat(amount) > parseFloat(balance)) return notify("Insufficient balance", "error");
+    
     setIsTrading(true);
     notify("Auto-trading started!", "success");
   };
@@ -53,8 +62,15 @@ export function TradingDashboard({ account, balance, showAlert, notify }: Tradin
         body: JSON.stringify({ strategy, principal: parseFloat(amount), duration: 60 })
       });
       const data = await response.json();
-      showAlert("Trading Settled", `Final PnL: ${data.profit.toFixed(2)} USDT\nYour Share: ${(data.profit > 0 ? data.profit / 2 : data.profit).toFixed(2)} USDT`);
+      
+      // Simulate returning balance + profit
+      const finalProfit = data.profit > 0 ? data.profit / 2 : data.profit;
+      showAlert("Trading Settled", `Final PnL: ${data.profit.toFixed(2)} USDT\nYour Share: ${finalProfit.toFixed(2)} USDT\n\nFunds have been returned to your wallet.`);
+      
       setIsTrading(false);
+      setPnl(0);
+      setChartData([]);
+      await updateBalance();
     } catch (error) {
       notify("Settlement failed", "error");
     }
@@ -62,6 +78,13 @@ export function TradingDashboard({ account, balance, showAlert, notify }: Tradin
 
   return (
     <div className="space-y-6 py-4">
+      {/* Bio Section */}
+      <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-2xl p-4">
+        <p className="text-[11px] text-emerald-200/60 leading-relaxed text-center italic">
+          "Quantum Finance operates as a core financial engine under Thalexa, an advanced platform developed by Gugu Robotics—built to unify intelligence, automation, and capital into a single decentralized ecosystem."
+        </p>
+      </div>
+
       {/* Chart Section */}
       <div className="bg-white/5 border border-white/10 rounded-3xl p-4 h-64 relative overflow-hidden">
         <div className="absolute top-4 left-4 z-10">

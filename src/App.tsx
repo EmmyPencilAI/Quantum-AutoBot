@@ -4,6 +4,7 @@ import { auth, db } from "./firebase";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit } from "firebase/firestore";
 import { CONFIG, USDT_ABI, QUANTUM_ABI } from "./config";
+import { getSupabaseProfile, updateSupabaseProfile } from "./supabase";
 import { Layout } from "./components/Layout";
 import { TradingDashboard } from "./components/TradingDashboard";
 import { WalletTab } from "./components/WalletTab";
@@ -49,6 +50,47 @@ export default function App() {
   const [modal, setModal] = useState<ModalConfig | null>(null);
   const [promptValue, setPromptValue] = useState("");
 
+  // Trading State (Lifted for persistence)
+  const [isTrading, setIsTrading] = useState(() => {
+    const saved = localStorage.getItem("isTrading");
+    return saved === "true";
+  });
+  const [tradingAmount, setTradingAmount] = useState(() => localStorage.getItem("tradingAmount") || "");
+  const [tradingPnl, setTradingPnl] = useState(() => parseFloat(localStorage.getItem("tradingPnl") || "0"));
+  const [tradingChartData, setTradingChartData] = useState<any[]>(() => {
+    const saved = localStorage.getItem("tradingChartData");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [tradingStrategy, setTradingStrategy] = useState(() => localStorage.getItem("tradingStrategy") || CONFIG.STRATEGIES[0]);
+  const [tradingPair, setTradingPair] = useState(() => localStorage.getItem("tradingPair") || CONFIG.PAIRS[0]);
+
+  useEffect(() => {
+    localStorage.setItem("isTrading", isTrading.toString());
+    localStorage.setItem("tradingAmount", tradingAmount);
+    localStorage.setItem("tradingPnl", tradingPnl.toString());
+    localStorage.setItem("tradingChartData", JSON.stringify(tradingChartData));
+    localStorage.setItem("tradingStrategy", tradingStrategy);
+    localStorage.setItem("tradingPair", tradingPair);
+  }, [isTrading, tradingAmount, tradingPnl, tradingChartData, tradingStrategy, tradingPair]);
+
+  useEffect(() => {
+    let interval: any;
+    if (isTrading) {
+      interval = setInterval(() => {
+        const change = (Math.random() * 2 - 0.9) * (tradingStrategy === "Aggressive" ? 2 : 1);
+        setTradingPnl(prev => prev + change);
+        setTradingChartData(prev => {
+          const newData = [
+            ...prev.slice(-19),
+            { time: new Date().toLocaleTimeString(), value: (prev[prev.length - 1]?.value || 0) + change }
+          ];
+          return newData;
+        });
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [isTrading, tradingStrategy]);
+
   const notify = (message: string, type: "success" | "error" | "info" = "info") => {
     const id = Math.random().toString(36).substring(2, 9);
     setNotifications(prev => [...prev, { id, type, message }]);
@@ -78,9 +120,15 @@ export default function App() {
         const accounts = await provider.send("eth_requestAccounts", []);
         setAccount(accounts[0]);
         
-        if (!auth.currentUser) {
-          await signInAnonymously(auth);
+        // Graceful auth for community features
+        try {
+          if (!auth.currentUser) {
+            await signInAnonymously(auth);
+          }
+        } catch (authError) {
+          console.warn("Firebase anonymous auth failed, community features may be limited:", authError);
         }
+        
         notify("Wallet connected successfully!", "success");
       } catch (error: any) {
         console.error("Wallet connection failed:", error);
@@ -98,29 +146,27 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Fetch User Profile
+  // Fetch User Profile (Supabase)
   useEffect(() => {
-    if (account && isAuthReady) {
-      const userRef = doc(db, "users", account.toLowerCase());
-      const unsub = onSnapshot(userRef, (docSnap) => {
-        if (docSnap.exists()) {
-          setUserProfile(docSnap.data());
-        } else {
-          // Initialize profile
-          const initialProfile = {
-            uid: account.toLowerCase(),
-            username: `User_${account.slice(2, 6)}`,
-            totalProfit: 0,
-            lastActive: new Date().toISOString(),
-            avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${account}`
-          };
-          setDoc(userRef, initialProfile);
-          setUserProfile(initialProfile);
+    if (account) {
+      const fetchProfile = async () => {
+        try {
+          let profile = await getSupabaseProfile(account.toLowerCase());
+          if (!profile) {
+            profile = await updateSupabaseProfile(account.toLowerCase(), {
+              username: `User_${account.slice(2, 6)}`,
+              totalProfit: 0,
+              avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${account}`
+            });
+          }
+          setUserProfile(profile);
+        } catch (error) {
+          console.error("Supabase profile error:", error);
         }
-      });
-      return () => unsub();
+      };
+      fetchProfile();
     }
-  }, [account, isAuthReady]);
+  }, [account]);
 
   // Fetch Balance
   const updateBalance = useCallback(async () => {
@@ -147,7 +193,27 @@ export default function App() {
       case "wallet":
         return <WalletTab account={account} balance={balance} connectWallet={connectWallet} notify={notify} showPrompt={showPrompt} showAlert={showAlert} />;
       case "trading":
-        return <TradingDashboard account={account} balance={balance} showAlert={showAlert} notify={notify} />;
+        return (
+          <TradingDashboard 
+            account={account} 
+            balance={balance} 
+            showAlert={showAlert} 
+            notify={notify}
+            isTrading={isTrading}
+            setIsTrading={setIsTrading}
+            pnl={tradingPnl}
+            setPnl={setTradingPnl}
+            chartData={tradingChartData}
+            setChartData={setTradingChartData}
+            amount={tradingAmount}
+            setAmount={setTradingAmount}
+            strategy={tradingStrategy}
+            setStrategy={setTradingStrategy}
+            pair={tradingPair}
+            setPair={setTradingPair}
+            updateBalance={updateBalance}
+          />
+        );
       case "leaderboard":
         return <Leaderboard />;
       case "community":
@@ -189,12 +255,7 @@ export default function App() {
 
       <Layout activeTab={activeTab} setActiveTab={setActiveTab} account={account}>
         <div className="pt-16 pb-24 max-w-lg mx-auto px-4 min-h-screen flex flex-col">
-          {activeTab === "wallet" && <WalletTab account={account} balance={balance} connectWallet={connectWallet} notify={notify} showPrompt={showPrompt} showAlert={showAlert} />}
-          {activeTab === "trading" && <TradingDashboard account={account} balance={balance} showAlert={showAlert} notify={notify} />}
-          {activeTab === "leaderboard" && <Leaderboard />}
-          {activeTab === "community" && <Community userProfile={userProfile} notify={notify} />}
-          {activeTab === "settings" && <Settings userProfile={userProfile} showConfirm={showConfirm} notify={notify} />}
-          {activeTab === "markets" && <Markets />}
+          {renderTab()}
         </div>
       </Layout>
 

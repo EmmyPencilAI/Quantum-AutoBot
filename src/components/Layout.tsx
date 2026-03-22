@@ -30,8 +30,21 @@ export function Layout({ children, activeTab, setActiveTab, account }: LayoutPro
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-[#0a0a0a]/80 backdrop-blur-xl border-b border-white/5 px-4 h-16 flex items-center justify-between max-w-lg mx-auto">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <TrendingUp className="text-black" size={18} />
+          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-500/20 overflow-hidden">
+            <img 
+              src="https://drive.google.com/uc?export=view&id=16POTdSt2d2Zh_caldrCLB-vMjIwYhl3Y" 
+              alt="Logo" 
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                // Fallback if drive link fails
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement?.classList.add('flex', 'items-center', 'justify-center');
+                const icon = document.createElement('div');
+                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trending-up text-black"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>';
+                e.currentTarget.parentElement?.appendChild(icon.firstChild!);
+              }}
+            />
           </div>
           <span className="font-bold text-lg tracking-tight">QUANTUM</span>
         </div>

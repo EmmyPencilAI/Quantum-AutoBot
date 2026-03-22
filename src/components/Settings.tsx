@@ -1,6 +1,5 @@
 import React, { useState } from "react";
-import { db } from "../firebase";
-import { doc, updateDoc } from "firebase/firestore";
+import { updateSupabaseProfile } from "../supabase";
 import { User, Camera, Bell, Shield, LogOut, X, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -26,8 +25,7 @@ export function Settings({ userProfile, showConfirm, notify }: SettingsProps) {
     if (!userProfile) return;
     setIsUpdating(true);
     try {
-      const userRef = doc(db, "users", userProfile.uid);
-      await updateDoc(userRef, updates);
+      await updateSupabaseProfile(userProfile.uid, updates);
       notify("Profile updated!", "success");
     } catch (error) {
       console.error("Failed to update profile:", error);

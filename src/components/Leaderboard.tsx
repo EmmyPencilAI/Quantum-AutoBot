@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { db } from "../firebase";
-import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+import { supabase } from "../supabase";
 import { Trophy, Medal, Crown } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -9,12 +8,30 @@ export function Leaderboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(collection(db, "users"), orderBy("totalProfit", "desc"), limit(100));
-    const unsub = onSnapshot(q, (snap) => {
-      setUsers(snap.docs.map(doc => doc.data()));
+    const fetchLeaderboard = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('totalProfit', { ascending: false })
+        .limit(100);
+      
+      if (data) setUsers(data);
       setLoading(false);
-    });
-    return () => unsub();
+    };
+
+    fetchLeaderboard();
+    
+    // Optional: Real-time updates
+    const channel = supabase
+      .channel('leaderboard_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        fetchLeaderboard();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   if (loading) return <div className="py-20 text-center text-white/40">Loading rankings...</div>;
