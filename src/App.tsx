@@ -63,6 +63,10 @@ export default function App() {
   });
   const [tradingStrategy, setTradingStrategy] = useState(() => localStorage.getItem("tradingStrategy") || CONFIG.STRATEGIES[0]);
   const [tradingPair, setTradingPair] = useState(() => localStorage.getItem("tradingPair") || CONFIG.PAIRS[0]);
+  const [tradingHistory, setTradingHistory] = useState<any[]>(() => {
+    const saved = localStorage.getItem("tradingHistory");
+    return saved ? JSON.parse(saved) : [];
+  });
 
   useEffect(() => {
     localStorage.setItem("isTrading", isTrading.toString());
@@ -71,7 +75,8 @@ export default function App() {
     localStorage.setItem("tradingChartData", JSON.stringify(tradingChartData));
     localStorage.setItem("tradingStrategy", tradingStrategy);
     localStorage.setItem("tradingPair", tradingPair);
-  }, [isTrading, tradingAmount, tradingPnl, tradingChartData, tradingStrategy, tradingPair]);
+    localStorage.setItem("tradingHistory", JSON.stringify(tradingHistory));
+  }, [isTrading, tradingAmount, tradingPnl, tradingChartData, tradingStrategy, tradingPair, tradingHistory]);
 
   useEffect(() => {
     let interval: any;
@@ -79,17 +84,32 @@ export default function App() {
       interval = setInterval(() => {
         const change = (Math.random() * 2 - 0.9) * (tradingStrategy === "Aggressive" ? 2 : 1);
         setTradingPnl(prev => prev + change);
+        
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString();
+        
         setTradingChartData(prev => {
           const newData = [
             ...prev.slice(-19),
-            { time: new Date().toLocaleTimeString(), value: (prev[prev.length - 1]?.value || 0) + change }
+            { time: timeStr, value: (prev[prev.length - 1]?.value || 0) + change }
           ];
           return newData;
+        });
+
+        setTradingHistory(prev => {
+          const newTrade = {
+            id: Math.random().toString(36).substring(2, 9),
+            time: timeStr,
+            type: change >= 0 ? "up" : "down",
+            amount: Math.abs(change).toFixed(4),
+            pair: tradingPair
+          };
+          return [newTrade, ...prev.slice(0, 99)];
         });
       }, 3000);
     }
     return () => clearInterval(interval);
-  }, [isTrading, tradingStrategy]);
+  }, [isTrading, tradingStrategy, tradingPair]);
 
   const notify = (message: string, type: "success" | "error" | "info" = "info") => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -211,6 +231,7 @@ export default function App() {
             setStrategy={setTradingStrategy}
             pair={tradingPair}
             setPair={setTradingPair}
+            history={tradingHistory}
             updateBalance={updateBalance}
           />
         );

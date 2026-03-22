@@ -21,6 +21,7 @@ interface TradingDashboardProps {
   setStrategy: (val: string) => void;
   pair: string;
   setPair: (val: string) => void;
+  history: any[];
   updateBalance: () => Promise<void>;
 }
 
@@ -41,6 +42,7 @@ export function TradingDashboard({
   setStrategy,
   pair,
   setPair,
+  history,
   updateBalance
 }: TradingDashboardProps) {
 
@@ -56,6 +58,11 @@ export function TradingDashboard({
   const handleStop = async () => {
     if (!account) return notify("Connect wallet first", "error");
     
+    const principalVal = parseFloat(amount);
+    if (isNaN(principalVal) || principalVal <= 0) {
+      return notify("Invalid trading amount", "error");
+    }
+
     try {
       notify("Settling trades...", "info");
       const response = await fetch("/api/trading/simulate", {
@@ -63,27 +70,25 @@ export function TradingDashboard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           strategy, 
-          principal: parseFloat(amount), 
+          principal: principalVal, 
           duration: 60,
           account: account.toLowerCase()
         })
       });
       
-      if (!response.ok) {
-        throw new Error("Server error during settlement");
-      }
-      
       const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Server error during settlement");
+      }
       
       if (data.error) {
         notify(`Settlement error: ${data.error}`, "error");
-        // Even if on-chain fails, we might want to stop the UI trading state
-        // but it's safer to let the user retry if it's a real contract issue.
         return;
       }
       
       // Simulate returning balance + profit
-      const finalProfit = data.profit > 0 ? data.profit / 2 : data.profit;
+      const finalProfit = data.profit > 0 ? data.profit * 0.8 : data.profit; // 80/20 split
       const txMsg = data.txHash ? `\n\nTransaction: ${data.txHash.slice(0, 10)}...` : "";
       
       showAlert("Trading Settled", `Final PnL: ${data.profit.toFixed(2)} USDT\nYour Share: ${finalProfit.toFixed(2)} USDT\n\nFunds have been returned to your wallet.${txMsg}`);
@@ -92,7 +97,6 @@ export function TradingDashboard({
       setPnl(0);
       setChartData([]);
       
-      // Wait a bit for blockchain to update before refreshing balance
       setTimeout(async () => {
         await updateBalance();
       }, 2000);
@@ -213,9 +217,49 @@ export function TradingDashboard({
             className="w-full bg-red-500 text-white font-bold py-5 rounded-2xl flex items-center justify-center gap-2 hover:bg-red-400 transition-all active:scale-[0.98] shadow-lg shadow-red-500/20"
           >
             <Square size={20} fill="currentColor" />
-            Stop & Settle
+            Stop Trade
           </button>
         )}
+      </div>
+
+      {/* Trade History Section */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between px-2">
+          <h3 className="text-sm font-bold text-white/60 uppercase tracking-widest">Trade History</h3>
+          <span className="text-[10px] font-bold text-white/20">{history.length} Recent Trades</span>
+        </div>
+        
+        <div className="bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
+          <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+            {history.length === 0 ? (
+              <div className="p-8 text-center text-white/20 text-xs italic">
+                No trades recorded yet. Start auto-trading to see history.
+              </div>
+            ) : (
+              <div className="divide-y divide-white/5">
+                {history.map((trade) => (
+                  <div key={trade.id} className="p-4 flex items-center justify-between hover:bg-white/5 transition-all">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${trade.type === 'up' ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+                        {trade.type === 'up' ? <TrendingUp size={16} className="text-emerald-500" /> : <TrendingDown size={16} className="text-red-500" />}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold">{trade.pair}</p>
+                        <p className="text-[10px] text-white/40">{trade.time}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-xs font-bold ${trade.type === 'up' ? 'text-emerald-500' : 'text-red-500'}`}>
+                        {trade.type === 'up' ? '+' : '-'}{trade.amount}
+                      </p>
+                      <p className="text-[10px] text-white/20 uppercase font-bold tracking-tighter">USDT</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-4 flex gap-3">

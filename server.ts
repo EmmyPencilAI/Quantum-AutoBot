@@ -59,7 +59,9 @@ async function startServer() {
 
     const finalBalanceVal = principal * multiplier;
     const profit = finalBalanceVal - principal;
-    const finalBalanceFormatted = Math.max(0, finalBalanceVal);
+    const finalBalanceFormatted = isNaN(finalBalanceVal) ? 0 : Math.max(0, finalBalanceVal);
+
+    console.log(`Simulation: Strategy=${strategy}, Principal=${principal}, Multiplier=${multiplier}, Final=${finalBalanceFormatted}`);
 
     let txHash = null;
     let error = null;
@@ -67,6 +69,7 @@ async function startServer() {
     // Real On-Chain Settlement if Private Key is present
     if (account && process.env.OWNER_PRIVATE_KEY) {
       try {
+        console.log(`Attempting on-chain settlement for ${account} with balance ${finalBalanceFormatted}`);
         const provider = new ethers.JsonRpcProvider(RPC_URL);
         const wallet = new ethers.Wallet(process.env.OWNER_PRIVATE_KEY, provider);
         const contract = new ethers.Contract(CONTRACT_ADDRESS, QUANTUM_ABI, wallet);
@@ -75,12 +78,16 @@ async function startServer() {
         const finalBalanceWei = ethers.parseUnits(finalBalanceFormatted.toFixed(18), 18);
         
         const tx = await contract.settle(account, finalBalanceWei);
+        console.log(`Settlement TX sent: ${tx.hash}`);
         txHash = tx.hash;
         await tx.wait();
+        console.log(`Settlement TX confirmed: ${tx.hash}`);
       } catch (e: any) {
         console.error("On-chain settlement failed:", e);
-        error = e.message;
+        error = e.message || "Unknown blockchain error";
       }
+    } else if (!process.env.OWNER_PRIVATE_KEY) {
+      console.log("Skipping on-chain settlement: OWNER_PRIVATE_KEY not set");
     }
 
     res.json({
