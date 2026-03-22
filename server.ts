@@ -61,9 +61,15 @@ async function startServer() {
     const profit = finalBalanceVal - principal;
     
     // 50/50 profit split: user gets principal + 50% of profit (if profit > 0)
+    // If profit is negative, user takes the full loss
     const userShareOfProfit = profit > 0 ? profit * 0.5 : profit;
     const userFinalBalance = principal + userShareOfProfit;
-    const finalBalanceFormatted = isNaN(userFinalBalance) ? 0 : Math.max(0, userFinalBalance);
+    
+    // Ensure we have a valid number and it's not negative
+    let finalBalanceFormatted = 0;
+    if (!isNaN(userFinalBalance) && isFinite(userFinalBalance)) {
+      finalBalanceFormatted = Math.max(0, userFinalBalance);
+    }
 
     console.log(`Simulation: Strategy=${strategy}, Principal=${principal}, Multiplier=${multiplier}, Profit=${profit}, UserShare=${userShareOfProfit}, Final=${finalBalanceFormatted}`);
 
@@ -78,8 +84,10 @@ async function startServer() {
         const wallet = new ethers.Wallet(process.env.OWNER_PRIVATE_KEY, provider);
         const contract = new ethers.Contract(CONTRACT_ADDRESS, QUANTUM_ABI, wallet);
         
-        // Convert to Wei (18 decimals)
-        const finalBalanceWei = ethers.parseUnits(finalBalanceFormatted.toFixed(18), 18);
+        // Convert to Wei (18 decimals) safely
+        // We use a fixed precision string to avoid scientific notation and pattern issues
+        const balanceStr = finalBalanceFormatted.toFixed(18);
+        const finalBalanceWei = ethers.parseUnits(balanceStr, 18);
         
         const tx = await contract.settle(account, finalBalanceWei);
         console.log(`Settlement TX sent: ${tx.hash}`);

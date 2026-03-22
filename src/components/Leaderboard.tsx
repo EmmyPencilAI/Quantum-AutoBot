@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { supabase } from "../supabase";
+import { db } from "../firebase";
+import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { Trophy, Medal, Crown } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -8,30 +9,25 @@ export function Leaderboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchLeaderboard = async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('totalProfit', { ascending: false })
-        .limit(100);
-      
-      if (data) setUsers(data);
+    const q = query(
+      collection(db, "users"), 
+      orderBy("totalProfit", "desc"), 
+      limit(100)
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const leaderboardData = snap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setUsers(leaderboardData);
       setLoading(false);
-    };
+    }, (error) => {
+      console.error("Leaderboard snapshot error:", error);
+      setLoading(false);
+    });
 
-    fetchLeaderboard();
-    
-    // Optional: Real-time updates
-    const channel = supabase
-      .channel('leaderboard_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
-        fetchLeaderboard();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => unsub();
   }, []);
 
   if (loading) return <div className="py-20 text-center text-white/40">Loading rankings...</div>;

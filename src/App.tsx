@@ -4,7 +4,6 @@ import { auth, db } from "./firebase";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit } from "firebase/firestore";
 import { CONFIG, USDT_ABI, QUANTUM_ABI } from "./config";
-import { getSupabaseProfile, updateSupabaseProfile } from "./supabase";
 import { Layout } from "./components/Layout";
 import { TradingDashboard } from "./components/TradingDashboard";
 import { WalletTab } from "./components/WalletTab";
@@ -166,28 +165,38 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Fetch User Profile (Supabase)
+  // Fetch User Profile (Firestore)
   const fetchProfile = useCallback(async () => {
-    if (account) {
+    if (account && auth.currentUser) {
       try {
-        let profile = await getSupabaseProfile(account.toLowerCase());
-        if (!profile) {
-          profile = await updateSupabaseProfile(account.toLowerCase(), {
+        const profileRef = doc(db, "users", auth.currentUser.uid);
+        const profileSnap = await getDoc(profileRef);
+        
+        if (profileSnap.exists()) {
+          setUserProfile({ uid: auth.currentUser.uid, ...profileSnap.data() });
+        } else {
+          const newProfile = {
+            walletAddress: account.toLowerCase(),
             username: `User_${account.slice(2, 6)}`,
             totalProfit: 0,
-            avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${account}`
-          });
+            avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${account}`,
+            lastActive: new Date().toISOString(),
+            role: "user"
+          };
+          await setDoc(profileRef, newProfile);
+          setUserProfile({ uid: auth.currentUser.uid, ...newProfile });
         }
-        setUserProfile(profile);
       } catch (error) {
-        console.error("Supabase profile error:", error);
+        console.error("Firestore profile error:", error);
       }
     }
   }, [account]);
 
   useEffect(() => {
-    fetchProfile();
-  }, [fetchProfile]);
+    if (isAuthReady && account) {
+      fetchProfile();
+    }
+  }, [fetchProfile, isAuthReady, account]);
 
   // Fetch Balance
   const updateBalance = useCallback(async () => {

@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { TrendingUp, TrendingDown, Play, Square, Info, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { CONFIG } from "../config";
-import { getSupabaseProfile, updateSupabaseProfile } from "../supabase";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { db } from "../firebase";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 
 interface TradingDashboardProps {
@@ -95,14 +96,22 @@ export function TradingDashboard({
       const finalProfit = data.profit; // Server already calculated the 50/50 split
       const txMsg = data.txHash ? `\n\nTransaction: ${data.txHash.slice(0, 10)}...` : "";
       
-      // Update Supabase total profit for leaderboard
+      // Update Firestore total profit for leaderboard
       try {
-        const currentProfile = await getSupabaseProfile(account.toLowerCase());
-        const newTotalProfit = (currentProfile?.totalProfit || 0) + finalProfit;
-        await updateSupabaseProfile(account.toLowerCase(), { totalProfit: newTotalProfit });
-        await refreshProfile();
-      } catch (supabaseError) {
-        console.error("Failed to update total profit in Supabase:", supabaseError);
+        if (account) {
+          const profileRef = doc(db, "users", userProfile.uid);
+          const profileSnap = await getDoc(profileRef);
+          if (profileSnap.exists()) {
+            const currentTotalProfit = profileSnap.data().totalProfit || 0;
+            await updateDoc(profileRef, { 
+              totalProfit: currentTotalProfit + finalProfit,
+              lastActive: new Date().toISOString()
+            });
+            await refreshProfile();
+          }
+        }
+      } catch (firestoreError) {
+        console.error("Failed to update total profit in Firestore:", firestoreError);
       }
 
       showAlert("Trading Settled", `Final PnL: ${data.totalProfit.toFixed(2)} USDT\nYour Share (50%): ${finalProfit.toFixed(2)} USDT\n\nFunds have been returned to your wallet.${txMsg}`);

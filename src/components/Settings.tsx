@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { updateSupabaseProfile } from "../supabase";
+import { doc, updateDoc } from "firebase/firestore";
+import { db } from "../firebase";
 import { User, Camera, Bell, Shield, LogOut, X, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -26,7 +27,11 @@ export function Settings({ userProfile, showConfirm, notify, refreshProfile }: S
     if (!userProfile) return;
     setIsUpdating(true);
     try {
-      await updateSupabaseProfile(userProfile.uid, updates);
+      const profileRef = doc(db, "users", userProfile.uid);
+      await updateDoc(profileRef, {
+        ...updates,
+        lastActive: new Date().toISOString()
+      });
       await refreshProfile();
       notify("Profile updated!", "success");
     } catch (error) {
@@ -61,7 +66,12 @@ export function Settings({ userProfile, showConfirm, notify, refreshProfile }: S
 
   const handleDisconnect = () => {
     showConfirm("Disconnect Wallet", "Are you sure you want to disconnect? This will reload the application.", () => {
-      window.location.reload();
+      try {
+        window.location.reload();
+      } catch (e) {
+        console.error("Failed to reload:", e);
+        // Fallback or just ignore if in cross-origin frame
+      }
     });
   };
 

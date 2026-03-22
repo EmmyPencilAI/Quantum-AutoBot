@@ -33,6 +33,7 @@ const TradingViewWidget: React.FC<{ symbol: string }> = ({ symbol }) => {
           "enable_publishing": false,
           "allow_symbol_change": true,
           "container_id": containerId,
+          // Removed origin to avoid cross-origin frame access errors in iframe
         });
       }
     };

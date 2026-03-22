@@ -5,15 +5,16 @@
       "description": "User profile data for leaderboard and community.",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "description": "Wallet address" },
+        "walletAddress": { "type": "string", "description": "Wallet address" },
         "username": { "type": "string", "description": "Display name" },
         "avatar": { "type": "string", "description": "Web3 avatar URL" },
         "totalProfit": { "type": "number", "description": "Total USDT profit" },
         "strategy": { "type": "string", "description": "Active strategy" },
         "region": { "type": "string", "description": "User region" },
-        "lastActive": { "type": "string", "format": "date-time", "description": "Last activity timestamp" }
+        "lastActive": { "type": "string", "format": "date-time", "description": "Last activity timestamp" },
+        "role": { "type": "string", "description": "User role" }
       },
-      "required": ["uid", "username"]
+      "required": ["walletAddress", "username", "totalProfit", "lastActive"]
     },
     "Post": {
       "title": "Community Post",
@@ -21,14 +22,15 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "authorUid": { "type": "string" },
+        "authorUid": { "type": "string", "description": "Firebase UID" },
         "authorName": { "type": "string" },
         "authorAvatar": { "type": "string" },
+        "authorWallet": { "type": "string", "description": "Wallet address" },
         "content": { "type": "string" },
         "likes": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["authorUid", "content", "createdAt"]
+      "required": ["authorUid", "authorName", "authorWallet", "content", "likes", "createdAt"]
     },
     "Trade": {
       "title": "Trade History",

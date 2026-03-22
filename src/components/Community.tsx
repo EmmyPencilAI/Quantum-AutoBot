@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { db } from "../firebase";
-import { collection, query, orderBy, limit, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, increment } from "firebase/firestore";
+import { db, handleFirestoreError, OperationType } from "../firebase";
+import { collection, query, orderBy, limit, onSnapshot, addDoc, doc, updateDoc, increment } from "firebase/firestore";
 import { MessageSquare, Heart, Send, Share2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { formatDistanceToNow } from "date-fns";
@@ -28,11 +28,13 @@ export function Community({ userProfile, notify }: CommunityProps) {
   const handlePost = async () => {
     if (!newPost.trim() || !userProfile) return;
     setIsPosting(true);
+    const path = "posts";
     try {
-      await addDoc(collection(db, "posts"), {
+      await addDoc(collection(db, path), {
         authorUid: userProfile.uid,
         authorName: userProfile.username,
         authorAvatar: userProfile.avatar,
+        authorWallet: userProfile.walletAddress,
         content: newPost,
         likes: 0,
         createdAt: new Date().toISOString()
@@ -41,6 +43,7 @@ export function Community({ userProfile, notify }: CommunityProps) {
       notify("Post shared!", "success");
     } catch (error) {
       console.error("Failed to post:", error);
+      handleFirestoreError(error, OperationType.CREATE, path);
       notify("Failed to share post", "error");
     } finally {
       setIsPosting(false);
@@ -48,6 +51,7 @@ export function Community({ userProfile, notify }: CommunityProps) {
   };
 
   const handleLike = async (postId: string) => {
+    const path = `posts/${postId}`;
     try {
       const postRef = doc(db, "posts", postId);
       await updateDoc(postRef, {
@@ -55,6 +59,7 @@ export function Community({ userProfile, notify }: CommunityProps) {
       });
     } catch (error) {
       console.error("Failed to like:", error);
+      handleFirestoreError(error, OperationType.UPDATE, path);
       notify("Failed to like post", "error");
     }
   };

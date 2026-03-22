@@ -6,34 +6,27 @@ service cloud.firestore {
     // Assumed Data Model
     // ===============================================================
     // Collection: users
-    // Document ID: {uid} (Wallet address)
+    // Document ID: {uid} (Firebase UID)
     // Fields:
-    //   - uid: string (required, immutable)
+    //   - walletAddress: string (required, immutable)
     //   - username: string (required)
     //   - avatar: string (optional)
     //   - totalProfit: number (required)
     //   - strategy: string (optional)
     //   - region: string (optional)
     //   - lastActive: string (required)
+    //   - role: string (optional)
     //
     // Collection: posts
     // Document ID: {postId}
     // Fields:
-    //   - authorUid: string (required, immutable)
+    //   - authorUid: string (required, immutable, Firebase UID)
     //   - authorName: string (required)
     //   - authorAvatar: string (optional)
+    //   - authorWallet: string (required)
     //   - content: string (required)
     //   - likes: number (required)
     //   - createdAt: string (required, immutable)
-    //
-    // Collection: trades
-    // Document ID: {tradeId}
-    // Fields:
-    //   - uid: string (required, immutable)
-    //   - pair: string (required)
-    //   - strategy: string (required)
-    //   - pnl: number (required)
-    //   - timestamp: string (required, immutable)
     // ===============================================================
 
     // ===============================================================
@@ -54,8 +47,8 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'username', 'totalProfit', 'lastActive']) &&
-             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+      return data.keys().hasAll(['walletAddress', 'username', 'totalProfit', 'lastActive']) &&
+             data.walletAddress is string && data.walletAddress.size() > 0 &&
              data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
              data.totalProfit is number &&
              data.lastActive is string &&
@@ -63,21 +56,13 @@ service cloud.firestore {
     }
 
     function isValidPost(data) {
-      return data.keys().hasAll(['authorUid', 'authorName', 'content', 'likes', 'createdAt']) &&
+      return data.keys().hasAll(['authorUid', 'authorName', 'authorWallet', 'content', 'likes', 'createdAt']) &&
              data.authorUid is string && data.authorUid == request.auth.uid &&
              data.authorName is string && data.authorName.size() > 0 && data.authorName.size() < 50 &&
+             data.authorWallet is string &&
              data.content is string && data.content.size() > 0 && data.content.size() < 1000 &&
              data.likes is number &&
              data.createdAt is string;
-    }
-
-    function isValidTrade(data) {
-      return data.keys().hasAll(['uid', 'pair', 'strategy', 'pnl', 'timestamp']) &&
-             data.uid is string && data.uid == request.auth.uid &&
-             data.pair is string && data.pair.size() < 20 &&
-             data.strategy is string && data.strategy.size() < 50 &&
-             data.pnl is number &&
-             data.timestamp is string;
     }
 
     // ===============================================================
@@ -89,7 +74,7 @@ service cloud.firestore {
       allow create: if isOwner(uid) && isValidUser(request.resource.data) && 
                     (!('role' in request.resource.data) || request.resource.data.role == 'user' || isAdmin());
       allow update: if (isOwner(uid) || isAdmin()) && isValidUser(request.resource.data) && 
-                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.walletAddress == resource.data.walletAddress &&
                     (request.resource.data.role == resource.data.role || isAdmin());
     }
 
