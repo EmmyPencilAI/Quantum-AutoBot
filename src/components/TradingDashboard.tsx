@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { TrendingUp, TrendingDown, Play, Square, Info, ChevronDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Play, Square, Info, ChevronDown, Loader2, CheckCircle2, ExternalLink } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { CONFIG } from "../config";
 import { doc, getDoc, updateDoc, collection, addDoc } from "firebase/firestore";
@@ -25,7 +25,6 @@ interface TradingDashboardProps {
   setPair: (val: string) => void;
   history: any[];
   updateBalance: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
   setActiveTab: (tab: any) => void;
   userProfile: any;
 }
@@ -49,10 +48,11 @@ export function TradingDashboard({
   setPair,
   history,
   updateBalance,
-  refreshProfile,
   setActiveTab,
   userProfile
 }: TradingDashboardProps) {
+  const [isSettling, setIsSettling] = useState(false);
+  const [settlementResult, setSettlementResult] = useState<any>(null);
 
   const handleStart = () => {
     if (!account) return notify("Connect wallet first", "error");
@@ -71,8 +71,9 @@ export function TradingDashboard({
       return notify("Invalid trading amount", "error");
     }
 
+    setIsSettling(true);
     try {
-      notify("Settling trades...", "info");
+      notify("Settling trades on-chain...", "info");
       const response = await fetch("/api/trading/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,11 +93,12 @@ export function TradingDashboard({
       
       if (data.error) {
         notify(`Settlement error: ${data.error}`, "error");
+        setIsSettling(false);
         return;
       }
       
       const finalProfit = data.profit; // Server already calculated the 50/50 split
-      const txMsg = data.txHash ? `\n\nTransaction: ${data.txHash.slice(0, 10)}...` : "";
+      setSettlementResult(data);
       
       // Update Firestore total profit and trade history
       try {
@@ -118,30 +120,27 @@ export function TradingDashboard({
               strategy: strategy,
               pnl: data.totalProfit, // Total profit before split
               userShare: finalProfit, // User's 50% share
-              timestamp: new Date().toISOString()
+              timestamp: new Date().toISOString(),
+              txHash: data.txHash || null
             });
-
-            await refreshProfile();
           }
         }
       } catch (firestoreError) {
         console.error("Failed to update Firestore data:", firestoreError);
       }
 
-      showAlert("Trading Settled", `Final PnL: ${data.totalProfit.toFixed(2)} USDT\nYour Share (50%): ${finalProfit.toFixed(2)} USDT\n\nFunds have been returned to your wallet.${txMsg}`);
-      
       setIsTrading(false);
       setPnl(0);
       setChartData([]);
       
       setTimeout(async () => {
         await updateBalance();
-        setActiveTab("leaderboard");
       }, 2000);
       
     } catch (error: any) {
       console.error("Settlement failed:", error);
       notify(`Settlement failed: ${error.message || "Unknown error"}`, "error");
+      setIsSettling(false);
     }
   };
 
@@ -188,7 +187,72 @@ export function TradingDashboard({
       </div>
 
       {/* Controls */}
-      <div className="bg-white/5 border border-white/10 rounded-3xl p-4 sm:p-6 space-y-4 sm:space-y-6">
+      <div className="bg-white/5 border border-white/10 rounded-3xl p-4 sm:p-6 space-y-4 sm:space-y-6 relative overflow-hidden">
+        <AnimatePresence>
+          {isSettling && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-20 bg-[#0a0a0a]/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center"
+            >
+              {!settlementResult ? (
+                <>
+                  <Loader2 className="text-emerald-500 animate-spin mb-4" size={48} />
+                  <h3 className="text-lg font-bold mb-2">Settling On-Chain</h3>
+                  <p className="text-xs text-white/40 max-w-[200px]">
+                    Processing your trade settlement through the Quantum Finance smart contract...
+                  </p>
+                </>
+              ) : (
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="space-y-4"
+                >
+                  <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="text-emerald-500" size={32} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold">Settlement Success</h3>
+                    <p className="text-xs text-white/40">Your share has been returned to your wallet.</p>
+                  </div>
+                  <div className="bg-white/5 rounded-2xl p-4 space-y-2">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-white/40">Total PnL</span>
+                      <span className="font-bold text-emerald-500">+${settlementResult.totalProfit.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-white/40">Your Share (50%)</span>
+                      <span className="font-bold text-emerald-500">+${settlementResult.profit.toFixed(2)}</span>
+                    </div>
+                  </div>
+                  {settlementResult.txHash && (
+                    <a 
+                      href={`https://testnet.bscscan.com/tx/${settlementResult.txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 text-[10px] font-bold text-emerald-500 hover:underline"
+                    >
+                      VIEW ON BSCSCAN <ExternalLink size={12} />
+                    </a>
+                  )}
+                  <button 
+                    onClick={() => {
+                      setIsSettling(false);
+                      setSettlementResult(null);
+                      setActiveTab("leaderboard");
+                    }}
+                    className="w-full bg-white text-black font-bold py-3 rounded-xl text-sm"
+                  >
+                    View Rankings
+                  </button>
+                </motion.div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="grid grid-cols-2 gap-3 sm:gap-4">
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest px-1">Trading Pair</label>

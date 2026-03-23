@@ -8,7 +8,6 @@ interface SettingsProps {
   userProfile: any;
   showConfirm: (title: string, message: string, onConfirm: () => void) => void;
   notify: (message: string, type?: "success" | "error" | "info") => void;
-  refreshProfile: () => Promise<void>;
 }
 
 const AVATAR_STYLES = [
@@ -16,7 +15,7 @@ const AVATAR_STYLES = [
   'notionists', 'open-peeps', 'personas', 'shapes', 'lorelei', 'big-smile'
 ];
 
-export function Settings({ userProfile, showConfirm, notify, refreshProfile }: SettingsProps) {
+export function Settings({ userProfile, showConfirm, notify }: SettingsProps) {
   const [username, setUsername] = useState(userProfile?.username || "");
   const [isUpdating, setIsUpdating] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -35,7 +34,6 @@ export function Settings({ userProfile, showConfirm, notify, refreshProfile }: S
         ...updates,
         lastActive: new Date().toISOString()
       });
-      await refreshProfile();
       notify("Profile updated!", "success");
     } catch (error) {
       console.error("Failed to update profile:", error);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { db, handleFirestoreError, OperationType } from "../firebase";
-import { collection, query, orderBy, limit, onSnapshot, addDoc, doc, updateDoc, increment } from "firebase/firestore";
+import { collection, query, orderBy, limit, onSnapshot, addDoc, doc, updateDoc, increment, getDoc } from "firebase/firestore";
 import { MessageSquare, Heart, Send, Share2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { formatDistanceToNow } from "date-fns";
@@ -8,6 +8,39 @@ import { formatDistanceToNow } from "date-fns";
 interface CommunityProps {
   userProfile: any;
   notify: (message: string, type?: "success" | "error" | "info") => void;
+}
+
+// Sub-component to fetch and display real-time user info for a post
+function PostAuthor({ uid, fallbackName, fallbackAvatar }: { uid: string, fallbackName: string, fallbackAvatar: string }) {
+  const [profile, setProfile] = useState<any>(null);
+
+  useEffect(() => {
+    if (!uid) return;
+    const profileRef = doc(db, "users", uid);
+    const unsub = onSnapshot(profileRef, (snap) => {
+      if (snap.exists()) {
+        setProfile(snap.data());
+      }
+    });
+    return () => unsub();
+  }, [uid]);
+
+  return (
+    <div className="flex items-center gap-3">
+      <img 
+        src={profile?.avatar || fallbackAvatar} 
+        className="w-10 h-10 rounded-xl bg-white/5" 
+        referrerPolicy="no-referrer" 
+        alt="Avatar"
+      />
+      <div>
+        <p className="font-bold text-sm">{profile?.username || fallbackName}</p>
+        <p className="text-[10px] text-white/40 font-medium">
+          {profile?.role === 'admin' ? 'MODERATOR' : 'TRADER'}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export function Community({ userProfile, notify }: CommunityProps) {
@@ -36,8 +69,8 @@ export function Community({ userProfile, notify }: CommunityProps) {
     try {
       await addDoc(collection(db, path), {
         authorUid: userProfile.uid,
-        authorName: userProfile.username,
-        authorAvatar: userProfile.avatar,
+        authorName: userProfile.username, // Fallback
+        authorAvatar: userProfile.avatar, // Fallback
         authorWallet: userProfile.walletAddress,
         content: newPost,
         likes: 0,
@@ -106,15 +139,11 @@ export function Community({ userProfile, notify }: CommunityProps) {
               className="bg-white/5 border border-white/10 rounded-3xl p-6 space-y-4"
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <img src={post.authorAvatar} className="w-10 h-10 rounded-xl bg-white/5" referrerPolicy="no-referrer" />
-                  <div>
-                    <p className="font-bold text-sm">{post.authorName}</p>
-                    <p className="text-[10px] text-white/40 font-medium">
-                      {post.createdAt ? formatDistanceToNow(new Date(post.createdAt)) + " ago" : "Just now"}
-                    </p>
-                  </div>
-                </div>
+                <PostAuthor 
+                  uid={post.authorUid} 
+                  fallbackName={post.authorName} 
+                  fallbackAvatar={post.authorAvatar} 
+                />
                 <button className="text-white/20 hover:text-white/60 transition-all">
                   <Share2 size={18} />
                 </button>
@@ -124,18 +153,23 @@ export function Community({ userProfile, notify }: CommunityProps) {
                 {post.content}
               </p>
 
-              <div className="flex items-center gap-6 pt-2">
-                <button 
-                  onClick={() => handleLike(post.id)}
-                  className="flex items-center gap-2 text-white/40 hover:text-red-500 transition-all group"
-                >
-                  <Heart size={18} className="group-active:scale-125 transition-transform" />
-                  <span className="text-xs font-bold">{post.likes}</span>
-                </button>
-                <button className="flex items-center gap-2 text-white/40 hover:text-blue-500 transition-all">
-                  <MessageSquare size={18} />
-                  <span className="text-xs font-bold">Reply</span>
-                </button>
+              <div className="flex items-center justify-between pt-2">
+                <div className="flex items-center gap-6">
+                  <button 
+                    onClick={() => handleLike(post.id)}
+                    className="flex items-center gap-2 text-white/40 hover:text-red-500 transition-all group"
+                  >
+                    <Heart size={18} className="group-active:scale-125 transition-transform" />
+                    <span className="text-xs font-bold">{post.likes}</span>
+                  </button>
+                  <button className="flex items-center gap-2 text-white/40 hover:text-blue-500 transition-all">
+                    <MessageSquare size={18} />
+                    <span className="text-xs font-bold">Reply</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-white/20 font-medium">
+                  {post.createdAt ? formatDistanceToNow(new Date(post.createdAt)) + " ago" : "Just now"}
+                </p>
               </div>
             </motion.div>
           ))}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit, where } from "firebase/firestore";
 import { CONFIG, USDT_ABI, QUANTUM_ABI } from "./config";
 import { Layout } from "./components/Layout";
 import { TradingDashboard } from "./components/TradingDashboard";
@@ -77,6 +77,31 @@ export default function App() {
     localStorage.setItem("tradingHistory", JSON.stringify(tradingHistory));
   }, [isTrading, tradingAmount, tradingPnl, tradingChartData, tradingStrategy, tradingPair, tradingHistory]);
 
+  // Real-time Trade History Sync (Firestore)
+  useEffect(() => {
+    if (isAuthReady && account && auth.currentUser) {
+      const tradesRef = collection(db, "trades");
+      const q = query(tradesRef, where("uid", "==", auth.currentUser.uid), orderBy("timestamp", "desc"), limit(50));
+      const unsub = onSnapshot(q, (snap) => {
+        const history = snap.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            time: new Date(data.timestamp).toLocaleString(),
+            type: data.pnl >= 0 ? "up" : "down",
+            amount: Math.abs(data.userShare || data.pnl).toFixed(4),
+            pair: data.pair
+          };
+        });
+        setTradingHistory(history);
+      }, (error) => {
+        console.error("Trade history sync error:", error);
+      });
+      return () => unsub();
+    }
+  }, [isAuthReady, account]);
+
+  // Live Trading Simulation (Local state only during active trade)
   useEffect(() => {
     let interval: any;
     if (isTrading) {
@@ -93,17 +118,6 @@ export default function App() {
             { time: timeStr, value: (prev[prev.length - 1]?.value || 0) + change }
           ];
           return newData;
-        });
-
-        setTradingHistory(prev => {
-          const newTrade = {
-            id: Math.random().toString(36).substring(2, 9),
-            time: timeStr,
-            type: change >= 0 ? "up" : "down",
-            amount: Math.abs(change).toFixed(4),
-            pair: tradingPair
-          };
-          return [newTrade, ...prev.slice(0, 99)];
         });
       }, 3000);
     }
@@ -165,16 +179,15 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Fetch User Profile (Firestore)
-  const fetchProfile = useCallback(async () => {
-    if (account && auth.currentUser) {
-      try {
-        const profileRef = doc(db, "users", auth.currentUser.uid);
-        const profileSnap = await getDoc(profileRef);
-        
-        if (profileSnap.exists()) {
-          setUserProfile({ uid: auth.currentUser.uid, ...profileSnap.data() });
+  // Real-time User Profile Sync (Firestore)
+  useEffect(() => {
+    if (isAuthReady && account && auth.currentUser) {
+      const profileRef = doc(db, "users", auth.currentUser.uid);
+      const unsub = onSnapshot(profileRef, (docSnap) => {
+        if (docSnap.exists()) {
+          setUserProfile({ uid: auth.currentUser.uid, ...docSnap.data() });
         } else {
+          // Create profile if it doesn't exist
           const newProfile = {
             walletAddress: account.toLowerCase(),
             username: `User_${account.slice(2, 6)}`,
@@ -183,20 +196,14 @@ export default function App() {
             lastActive: new Date().toISOString(),
             role: "user"
           };
-          await setDoc(profileRef, newProfile);
-          setUserProfile({ uid: auth.currentUser.uid, ...newProfile });
+          setDoc(profileRef, newProfile).catch(err => console.error("Failed to create profile:", err));
         }
-      } catch (error) {
-        console.error("Firestore profile error:", error);
-      }
+      }, (error) => {
+        console.error("Profile sync error:", error);
+      });
+      return () => unsub();
     }
-  }, [account]);
-
-  useEffect(() => {
-    if (isAuthReady && account) {
-      fetchProfile();
-    }
-  }, [fetchProfile, isAuthReady, account]);
+  }, [isAuthReady, account]);
 
   // Fetch Balance
   const updateBalance = useCallback(async () => {
@@ -243,7 +250,6 @@ export default function App() {
             setPair={setTradingPair}
             history={tradingHistory}
             updateBalance={updateBalance}
-            refreshProfile={fetchProfile}
             setActiveTab={setActiveTab}
             userProfile={userProfile}
           />
@@ -253,7 +259,7 @@ export default function App() {
       case "community":
         return <Community userProfile={userProfile} notify={notify} />;
       case "settings":
-        return <Settings userProfile={userProfile} showConfirm={showConfirm} notify={notify} refreshProfile={fetchProfile} />;
+        return <Settings userProfile={userProfile} showConfirm={showConfirm} notify={notify} />;
       case "markets":
         return <Markets />;
       default:

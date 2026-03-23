@@ -40,10 +40,11 @@
         "uid": { "type": "string" },
         "pair": { "type": "string" },
         "strategy": { "type": "string" },
-        "pnl": { "type": "number" },
+        "pnl": { "type": "number", "description": "Total profit before split" },
+        "userShare": { "type": "number", "description": "User's 50% share" },
         "timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "pair", "pnl", "timestamp"]
+      "required": ["uid", "pair", "pnl", "userShare", "timestamp"]
     }
   },
   "firestore": {
