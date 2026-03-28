@@ -102,36 +102,38 @@ export function TradingDashboard({
         return;
       }
       
-      const finalProfit = data.profit; // Server already calculated the 50/50 split
+      const finalProfit = data.profit; // User's 50% share
       setSettlementResult(data);
       
       // Update Firestore total profit and trade history
       try {
         if (userProfile?.uid) {
+          console.log("Updating Firestore for settlement:", userProfile.uid, finalProfit);
           const profileRef = doc(db, "users", userProfile.uid);
           const profileSnap = await getDoc(profileRef);
+          
           if (profileSnap.exists()) {
             const currentTotalProfit = profileSnap.data().totalProfit || 0;
             await updateDoc(profileRef, { 
               totalProfit: currentTotalProfit + finalProfit,
               lastActive: new Date().toISOString()
             });
-            
-            // Save trade history to Firestore
-            const tradesRef = collection(db, "trades");
-            await addDoc(tradesRef, {
-              uid: userProfile.uid,
-              pair: pair,
-              strategy: strategy,
-              pnl: data.totalProfit, // Total profit before split
-              userShare: finalProfit, // User's 50% share
-              timestamp: new Date().toISOString(),
-              txHash: data.txHash || null
-            });
           }
+          
+          // Save trade history to Firestore (Always, even if profile update failed)
+          const tradesRef = collection(db, "trades");
+          await addDoc(tradesRef, {
+            uid: userProfile.uid,
+            pair: pair,
+            strategy: strategy,
+            pnl: data.totalProfit, // Total profit before split
+            userShare: finalProfit, // User's 50% share
+            timestamp: new Date().toISOString(),
+            txHash: data.txHash || null
+          });
         }
       } catch (firestoreError) {
-        console.error("Failed to update Firestore data:", firestoreError);
+        console.error("Failed to update Firestore data during settlement:", firestoreError);
       }
 
       setIsTrading(false);

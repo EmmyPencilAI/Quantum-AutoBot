@@ -89,22 +89,6 @@ export function Settings({ userProfile, showConfirm, notify }: SettingsProps) {
     Array.from({ length: 5 }, (_, i) => `https://api.dicebear.com/7.x/${style}/svg?seed=${style}_${i}`)
   ).slice(0, 60);
 
-  if (!userProfile) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
-        <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center">
-          <User size={40} className="text-white/20" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold">Connect Wallet</h2>
-          <p className="text-sm text-white/40 max-w-[200px] mx-auto mt-2">
-            Please connect your wallet to view and update your profile settings.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6 py-4">
       <div className="flex flex-col items-center py-8">
@@ -122,12 +106,23 @@ export function Settings({ userProfile, showConfirm, notify }: SettingsProps) {
             <Camera size={16} />
           </button>
         </div>
-        <h2 className="mt-4 text-xl font-bold">{userProfile?.username}</h2>
-        <p className="text-xs text-white/40 font-mono mt-1">{userProfile?.uid}</p>
+        <h2 className="mt-4 text-xl font-bold">{userProfile?.username || "Guest"}</h2>
+        <p className="text-xs text-white/40 font-mono mt-1">
+          {userProfile?.walletAddress ? 
+            `${userProfile.walletAddress.slice(0, 6)}...${userProfile.walletAddress.slice(-4)}` : 
+            "Guest Account"}
+        </p>
       </div>
 
       <div className="space-y-4">
         <div className="bg-white/5 border border-white/10 rounded-3xl p-6 space-y-6">
+          {!userProfile?.walletAddress && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 mb-4">
+              <p className="text-xs text-amber-200/80">
+                Connect your wallet to sync your profile with your on-chain identity.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest px-1">Username</label>
             <input 
@@ -188,13 +183,15 @@ export function Settings({ userProfile, showConfirm, notify }: SettingsProps) {
           </div>
         </div>
 
-        <button 
-          onClick={handleDisconnect}
-          className="w-full bg-red-500/10 text-red-500 font-bold py-4 rounded-2xl flex items-center justify-center gap-2 hover:bg-red-500/20 transition-all border border-red-500/20"
-        >
-          <LogOut size={18} />
-          Disconnect Wallet
-        </button>
+        {userProfile?.walletAddress && (
+          <button 
+            onClick={handleDisconnect}
+            className="w-full bg-red-500/10 text-red-500 font-bold py-4 rounded-2xl flex items-center justify-center gap-2 hover:bg-red-500/20 transition-all border border-red-500/20"
+          >
+            <LogOut size={18} />
+            Disconnect Wallet
+          </button>
+        )}
       </div>
 
       <AnimatePresence>

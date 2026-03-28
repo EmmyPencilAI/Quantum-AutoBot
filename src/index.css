@@ -127,3 +127,33 @@
     padding: 0.25rem !important;
   }
 }
+
+/* Nav Button Styles */
+nav button:nth-of-type(3),
+nav button:nth-of-type(5),
+nav button:nth-of-type(6) {
+  position: relative;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+nav button:nth-of-type(3):hover,
+nav button:nth-of-type(5):hover,
+nav button:nth-of-type(6):hover {
+  transform: translateY(-2px);
+  color: #10b981; /* emerald-500 */
+}
+
+nav button:nth-of-type(3).active::after,
+nav button:nth-of-type(5).active::after,
+nav button:nth-of-type(6).active::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  background-color: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #10b981;
+}

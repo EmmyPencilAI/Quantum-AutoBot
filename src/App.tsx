@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, orderBy, limit, where } from "firebase/firestore";
 import { CONFIG, USDT_ABI, QUANTUM_ABI } from "./config";
 import { Layout } from "./components/Layout";
 import { TradingDashboard } from "./components/TradingDashboard";
@@ -213,14 +213,13 @@ export default function App() {
 
   // Real-time User Profile Sync (Firestore)
   useEffect(() => {
-    console.log("Profile Sync Effect:", { isAuthReady, hasUser: !!auth.currentUser });
+    console.log("Profile Sync Effect:", { isAuthReady, hasUser: !!auth.currentUser, account });
     if (isAuthReady && auth.currentUser) {
       const profileRef = doc(db, "users", auth.currentUser.uid);
-      const unsub = onSnapshot(profileRef, (docSnap) => {
+      const unsub = onSnapshot(profileRef, async (docSnap) => {
         console.log("Profile Snapshot:", docSnap.exists() ? "exists" : "not exists", docSnap.id);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          console.log("Profile Data:", data);
           const profile = { uid: auth.currentUser!.uid, ...data } as UserProfile;
           setUserProfile(profile);
           
@@ -229,18 +228,30 @@ export default function App() {
             console.log("Auto-connecting wallet from profile:", data.walletAddress);
             setAccount(data.walletAddress);
           }
-        } else if (account) {
-          console.log("Creating new profile for:", account);
-          // Create profile if it doesn't exist but we have an account
+          
+          // If wallet is connected but not in profile, update profile
+          if (account && data.walletAddress !== account.toLowerCase()) {
+            console.log("Updating profile with wallet address:", account);
+            await updateDoc(profileRef, { 
+              walletAddress: account.toLowerCase(),
+              // Update username if it was a guest name
+              username: data.username?.startsWith("Guest_") ? `User_${account.slice(2, 6)}` : data.username
+            });
+          }
+        } else {
+          console.log("Creating initial profile for:", account || "Guest");
+          // Create initial profile (Guest or with Wallet if connected)
           const newProfile = {
-            walletAddress: account.toLowerCase(),
-            username: `User_${account.slice(2, 6)}`,
+            walletAddress: account ? account.toLowerCase() : null,
+            username: account ? `User_${account.slice(2, 6)}` : `Guest_${auth.currentUser!.uid.slice(0, 4)}`,
             totalProfit: 0,
-            avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${account}`,
+            avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${account || auth.currentUser!.uid}`,
             lastActive: new Date().toISOString(),
-            role: "user"
+            role: "user",
+            notifications: true,
+            privacyMode: false
           };
-          setDoc(profileRef, newProfile).catch(err => console.error("Failed to create profile:", err));
+          await setDoc(profileRef, newProfile);
         }
       }, (error) => {
         console.error("Profile sync error:", error);

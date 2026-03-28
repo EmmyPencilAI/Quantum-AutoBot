@@ -18,35 +18,35 @@ let db: any = null;
 if (fs.existsSync(firebaseConfigPath)) {
   try {
     const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-    const app = admin.initializeApp({
-      credential: admin.credential.applicationDefault(), // This might fail if no default creds
-      projectId: firebaseConfig.projectId,
-    });
     
-    // Fallback if applicationDefault fails (common in this environment)
-    // Note: admin.apps.length check might be tricky if we already initialized above
+    if (!admin.apps.length) {
+      try {
+        // Try standard initialization first (best for managed environments)
+        admin.initializeApp({
+          projectId: firebaseConfig.projectId,
+        });
+        console.log("Firebase Admin initialized with projectId only");
+      } catch (e) {
+        console.warn("Standard initialization failed, trying applicationDefault:", e);
+        try {
+          admin.initializeApp({
+            credential: admin.credential.applicationDefault(),
+            projectId: firebaseConfig.projectId,
+          });
+          console.log("Firebase Admin initialized with applicationDefault");
+        } catch (err) {
+          console.error("Critical failure during Firebase Admin initialization:", err);
+        }
+      }
+    }
     
-    // Use the specific database ID if provided
+    const app = admin.app();
     const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
     db = getFirestore(app, dbId);
     
-    console.log(`Firebase Admin initialized in server for database: ${dbId}`);
+    console.log(`Firebase Admin initialized for database: ${dbId}`);
   } catch (e) {
-    console.error("Failed to initialize Firebase Admin:", e);
-    // Try one more time with just projectId if it failed
-    try {
-      const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-      if (!admin.apps.length) {
-        const app = admin.initializeApp({
-          projectId: firebaseConfig.projectId,
-        });
-        const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-        db = getFirestore(app, dbId);
-        console.log(`Firebase Admin initialized (fallback) for database: ${dbId}`);
-      }
-    } catch (err) {
-      console.error("Fallback Firebase Admin initialization failed:", err);
-    }
+    console.error("Critical failure during Firebase Admin initialization:", e);
   }
 }
 
@@ -66,10 +66,13 @@ const BOT_MESSAGES = [
 ];
 
 async function postBotMessage() {
-  if (!db) return;
+  if (!db) {
+    console.warn("Bot skipped post: Firestore not initialized");
+    return;
+  }
   try {
     const message = BOT_MESSAGES[Math.floor(Math.random() * BOT_MESSAGES.length)];
-    await db.collection("posts").add({
+    const postData = {
       authorUid: "system-bot",
       authorName: "Quantum Bot",
       authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
@@ -77,10 +80,17 @@ async function postBotMessage() {
       content: message,
       likes: Math.floor(Math.random() * 10),
       createdAt: new Date().toISOString()
-    });
-    console.log("Bot posted message:", message);
-  } catch (error) {
-    console.error("Bot failed to post:", error);
+    };
+    
+    console.log("Bot attempting to post:", JSON.stringify(postData));
+    console.log(`Using Firestore database: ${db.databaseId} in project: ${db.projectId}`);
+    await db.collection("posts").add(postData);
+    console.log("Bot posted successfully:", message);
+  } catch (error: any) {
+    console.error("Bot failed to post:", error.message || error);
+    if (error.code === 7) {
+      console.error("PERMISSION_DENIED: Check Firestore rules and IAM permissions for the service account.");
+    }
   }
 }
 
