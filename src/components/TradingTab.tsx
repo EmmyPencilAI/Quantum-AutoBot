@@ -117,21 +117,21 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   }, [isTrading, pnl]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-        <h2 className="text-3xl font-bold tracking-tight">Quantum Trading Engine</h2>
-        <div className="flex items-center gap-3">
-          <div className={`w-3 h-3 rounded-full ${isTrading ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
-          <span className="text-sm font-bold uppercase tracking-widest text-white/40">
+    <div className="space-y-4 md:space-y-6 pb-20 md:pb-0">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-4">
+        <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Quantum Trading Engine</h2>
+        <div className="flex items-center gap-2 md:gap-3">
+          <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${isTrading ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
+          <span className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-white/40">
             {isTrading ? "System Online" : "System Offline"}
           </span>
         </div>
       </div>
 
       {/* Warning Banner */}
-      <div className="bg-orange-500/10 border border-orange-500/20 p-4 rounded-2xl flex items-center gap-4">
-        <AlertTriangle className="text-orange-500 shrink-0" size={24} />
-        <p className="text-xs md:text-sm font-medium text-orange-200/80">
+      <div className="bg-orange-500/10 border border-orange-500/20 p-3 md:p-4 rounded-xl md:rounded-2xl flex items-start md:items-center gap-3 md:gap-4">
+        <AlertTriangle className="text-orange-500 shrink-0 w-5 h-5 md:w-6 md:h-6" />
+        <p className="text-[10px] md:text-sm font-medium text-orange-200/80 leading-tight">
           ⚠️ <span className="font-bold text-orange-500 uppercase">Warning:</span> Trading is risky. Profits are not guaranteed. Venture into the unknown responsibly.
         </p>
       </div>
@@ -139,27 +139,27 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Strategy Selection */}
         <div className="lg:col-span-1 space-y-3 md:space-y-4">
-          <h3 className="text-base md:text-lg font-bold tracking-tight mb-2 md:mb-4">Select Strategy</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3 md:gap-4">
+          <h3 className="text-sm md:text-lg font-bold tracking-tight mb-1 md:mb-4">Select Strategy</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2 md:gap-4">
             {strategies.map((s) => (
               <button
                 key={s.name}
                 onClick={() => changeStrategy(s.name)}
                 disabled={isTrading || loading}
-                className={`flex items-center gap-3 md:gap-4 p-4 md:p-5 rounded-2xl md:rounded-3xl border transition-all text-left ${
+                className={`flex items-center gap-3 md:gap-4 p-3 md:p-5 rounded-xl md:rounded-3xl border transition-all text-left ${
                   strategy === s.name
                     ? "bg-white/5 border-orange-500 shadow-lg shadow-orange-500/10"
                     : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
                 }`}
               >
-                <div className={`w-10 h-10 md:w-12 md:h-12 shrink-0 ${s.bg} ${s.color} rounded-xl md:rounded-2xl flex items-center justify-center`}>
-                  <s.icon size={20} className="md:w-6 md:h-6" />
+                <div className={`w-8 h-8 md:w-12 md:h-12 shrink-0 ${s.bg} ${s.color} rounded-lg md:rounded-2xl flex items-center justify-center`}>
+                  <s.icon size={16} className="md:w-6 md:h-6" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm md:text-lg truncate">{s.name}</p>
-                  <p className="text-[10px] md:text-xs text-white/40 leading-tight line-clamp-1 md:line-clamp-2">{s.desc}</p>
+                  <p className="font-bold text-xs md:text-lg truncate">{s.name}</p>
+                  <p className="text-[8px] md:text-xs text-white/40 leading-tight line-clamp-1 md:line-clamp-2">{s.desc}</p>
                 </div>
-                {strategy === s.name && <ChevronRight className="text-orange-500 shrink-0" size={16} />}
+                {strategy === s.name && <ChevronRight className="text-orange-500 shrink-0 md:w-4 md:h-4" size={14} />}
               </button>
             ))}
           </div>
@@ -167,7 +167,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           <button
             onClick={toggleTrading}
             disabled={loading}
-            className={`w-full py-4 md:py-6 rounded-2xl md:rounded-3xl font-bold text-lg md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all ${
+            className={`w-full py-4 md:py-6 rounded-xl md:rounded-3xl font-bold text-base md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all ${
               isTrading
                 ? "bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20"
                 : "bg-orange-500 text-black hover:scale-[1.02] shadow-xl shadow-orange-500/20"
@@ -175,13 +175,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           >
             {isTrading ? (
               <>
-                <Square size={20} className="md:w-6 md:h-6" fill="currentColor" />
-                <span className="truncate">{loading ? "Processing..." : "Stop Trading"}</span>
+                <Square size={18} className="md:w-6 md:h-6" fill="currentColor" />
+                <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Stop Trading"}</span>
               </>
             ) : (
               <>
-                <Play size={20} className="md:w-6 md:h-6" fill="currentColor" />
-                <span className="truncate">{loading ? "Processing..." : "Start Trading"}</span>
+                <Play size={18} className="md:w-6 md:h-6" fill="currentColor" />
+                <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Start Trading"}</span>
               </>
             )}
           </button>
@@ -189,21 +189,21 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
         {/* Live PnL & Activity */}
         <div className="lg:col-span-2 space-y-4 md:space-y-6">
-          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-5 md:p-8 relative overflow-hidden">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 md:mb-8">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden shadow-2xl">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 md:mb-8">
               <div>
-                <p className="text-white/40 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1">Live Profit/Loss</p>
-                <h3 className={`text-3xl md:text-5xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} <span className="text-xl md:text-2xl opacity-60">USDT</span>
+                <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Live Profit/Loss</p>
+                <h3 className={`text-2xl md:text-5xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} <span className="text-base md:text-2xl opacity-60">USDT</span>
                 </h3>
               </div>
               <div className="sm:text-right">
-                <p className="text-white/40 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Strategy</p>
-                <p className="text-lg md:text-xl font-bold text-orange-500">{strategy}</p>
+                <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Strategy</p>
+                <p className="text-base md:text-xl font-bold text-orange-500">{strategy}</p>
               </div>
             </div>
 
-            <div className="h-48 md:h-64 w-full">
+            <div className="h-40 md:h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={history}>
                   <defs>
@@ -234,17 +234,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           </div>
 
           {/* Trade Activity Feed */}
-          <div className="bg-[#0a0a0a] border border-white/10 rounded-3xl p-8">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold tracking-tight flex items-center gap-2">
-                <BarChart2 size={20} className="text-orange-500" />
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-2xl">
+            <div className="flex items-center justify-between mb-4 md:mb-6">
+              <h3 className="text-base md:text-xl font-bold tracking-tight flex items-center gap-2">
+                <BarChart2 size={18} className="text-orange-500 md:w-5 md:h-5" />
                 <span>Trade Activity Feed</span>
               </h3>
-              <div className="text-xs text-white/40 bg-white/5 px-3 py-1 rounded-full border border-white/10">
+              <div className="text-[9px] md:text-xs text-white/40 bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10">
                 Live Updates
               </div>
             </div>
-            <div className="space-y-4 max-h-64 overflow-y-auto pr-2 scrollbar-hide">
+            <div className="space-y-3 md:space-y-4 max-h-48 md:max-h-64 overflow-y-auto pr-2 scrollbar-hide">
               <AnimatePresence>
                 {history.length > 0 && history[0].time !== "Start" ? (
                   history.slice().reverse().map((trade) => (
@@ -252,30 +252,30 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       key={trade.id}
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5"
+                      className="flex items-center justify-between p-3 md:p-4 bg-white/5 rounded-xl md:rounded-2xl border border-white/5"
                     >
-                      <div className="flex items-center gap-4">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${trade.type === "Buy" ? "bg-green-400/10 text-green-400" : "bg-red-400/10 text-red-400"}`}>
+                      <div className="flex items-center gap-3 md:gap-4">
+                        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center font-bold text-[10px] md:text-xs ${trade.type === "Buy" ? "bg-green-400/10 text-green-400" : "bg-red-400/10 text-red-400"}`}>
                           {trade.type === "Buy" ? "BUY" : "SELL"}
                         </div>
-                        <div>
-                          <p className="font-bold">{trade.pair}</p>
-                          <p className="text-xs text-white/40">Price: ${trade.price.toLocaleString()}</p>
+                        <div className="min-w-0">
+                          <p className="font-bold text-xs md:text-base truncate">{trade.pair}</p>
+                          <p className="text-[9px] md:text-xs text-white/40 truncate">Price: ${trade.price.toLocaleString()}</p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className={`font-bold ${trade.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <div className="text-right shrink-0">
+                        <p className={`font-bold text-xs md:text-base ${trade.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
                           {trade.pnl >= 0 ? "+" : ""}{trade.pnl.toFixed(4)} USDT
                         </p>
-                        <p className="text-xs text-white/40">{trade.time}</p>
+                        <p className="text-[9px] md:text-xs text-white/40">{trade.time}</p>
                       </div>
                     </motion.div>
                   ))
                 ) : (
-                  <div className="flex flex-col items-center justify-center py-10 text-white/20">
-                    <TrendingUp size={48} className="mb-4 opacity-10" />
-                    <p className="font-bold">No active trades</p>
-                    <p className="text-xs">Start the engine to begin trading</p>
+                  <div className="flex flex-col items-center justify-center py-8 md:py-10 text-white/20">
+                    <TrendingUp size={32} className="mb-3 md:mb-4 opacity-10 md:w-12 md:h-12" />
+                    <p className="font-bold text-sm md:text-base">No active trades</p>
+                    <p className="text-[10px] md:text-xs">Start the engine to begin trading</p>
                   </div>
                 )}
               </AnimatePresence>

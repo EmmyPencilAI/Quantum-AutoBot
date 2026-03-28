@@ -72,22 +72,30 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, user
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+      <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
         {/* Header (Mobile) */}
-        <header className="md:hidden flex items-center justify-between p-4 bg-[#0a0a0a] border-b border-white/10">
+        <header className="md:hidden flex items-center justify-between p-3 md:p-4 bg-[#0a0a0a] border-b border-white/10 sticky top-0 z-40">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-orange-500 rounded flex items-center justify-center">
+            <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center shadow-lg shadow-orange-500/20">
               <TrendingUp size={18} className="text-black" />
             </div>
-            <span className="font-bold uppercase tracking-wider">Quantum</span>
+            <span className="font-bold uppercase tracking-wider text-sm md:text-base">Quantum</span>
           </div>
-          <button onClick={() => auth.signOut()} className="text-red-400">
-            <LogOut size={20} />
-          </button>
+          <div className="flex items-center gap-3">
+            <img
+              src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
+              alt="Avatar"
+              className="w-8 h-8 rounded-full border border-white/10"
+              referrerPolicy="no-referrer"
+            />
+            <button onClick={() => auth.signOut()} className="text-red-400 p-1">
+              <LogOut size={20} />
+            </button>
+          </div>
         </header>
 
         {/* Tab Content */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-8">
+        <div className="flex-1 overflow-y-auto p-3 md:p-8 pb-20 md:pb-8 scrollbar-hide">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -103,19 +111,22 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, user
         </div>
 
         {/* Bottom Nav (Mobile/Watch/Car) */}
-        <nav className="md:hidden flex justify-around p-2 bg-[#0a0a0a] border-t border-white/10 overflow-x-auto scrollbar-hide">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex justify-around p-2 bg-[#0a0a0a]/90 backdrop-blur-xl border-t border-white/10 overflow-x-auto scrollbar-hide">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-col items-center justify-center gap-1 min-w-[50px] px-2 py-1 transition-all ${
-                activeTab === tab.id ? "text-orange-500" : "text-white/40"
+              className={`flex flex-col items-center justify-center gap-1 min-w-[48px] px-1 py-1 transition-all relative ${
+                activeTab === tab.id ? "text-orange-500" : "text-white/40 hover:text-white"
               }`}
             >
-              <tab.icon size={22} className="shrink-0" />
-              <span className="text-[9px] uppercase font-bold tracking-tighter watch-hide truncate max-w-[60px]">
+              <tab.icon size={20} className={`shrink-0 ${activeTab === tab.id ? "scale-110" : ""} transition-transform`} />
+              <span className="text-[8px] md:text-[9px] uppercase font-bold tracking-tighter watch-hide truncate max-w-[50px]">
                 {tab.name}
               </span>
+              {activeTab === tab.id && (
+                <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-orange-500 blur-[2px] rounded-full" />
+              )}
             </button>
           ))}
         </nav>

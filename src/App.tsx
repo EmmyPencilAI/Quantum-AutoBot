@@ -120,7 +120,7 @@ const App: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">
+      <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-4 md:p-6 font-sans relative overflow-hidden">
         {/* Background Accents */}
         <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-500 rounded-full blur-[120px]" />
@@ -130,56 +130,56 @@ const App: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-xl w-full text-center space-y-10 relative z-10"
+          className="max-w-xl w-full text-center space-y-8 md:space-y-10 relative z-10"
         >
-          <div className="flex flex-col items-center gap-6">
-            <div className="w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-orange-500/20">
-              <TrendingUp size={40} className="text-black" />
+          <div className="flex flex-col items-center gap-4 md:gap-6">
+            <div className="w-16 h-16 md:w-20 md:h-20 bg-orange-500 rounded-2xl md:rounded-3xl flex items-center justify-center shadow-2xl shadow-orange-500/20">
+              <TrendingUp size={32} className="text-black md:w-10 md:h-10" />
             </div>
-            <h1 className="text-6xl font-bold tracking-tighter uppercase italic">Quantum Finance</h1>
-            <p className="text-xl text-white/60 font-medium">
+            <h1 className="text-4xl md:text-6xl font-bold tracking-tighter uppercase italic leading-none">Quantum Finance</h1>
+            <p className="text-base md:text-xl text-white/60 font-medium max-w-[280px] md:max-w-none mx-auto">
               The next generation of non-custodial trading on Sui. Powered by zkLogin.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 gap-3 md:gap-4">
             <button
               onClick={() => handleLogin(googleProvider)}
-              className="w-full bg-white text-black font-bold py-5 rounded-3xl flex items-center justify-center gap-3 hover:scale-105 transition-all shadow-xl"
+              className="w-full bg-white text-black font-bold py-4 md:py-5 rounded-2xl md:rounded-3xl flex items-center justify-center gap-3 hover:scale-105 transition-all shadow-xl text-sm md:text-base"
             >
-              <Chrome size={24} />
+              <Chrome size={20} className="md:w-6 md:h-6" />
               <span>Continue with Google</span>
             </button>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3 md:gap-4">
               <button
                 onClick={() => handleLogin(facebookProvider)}
-                className="bg-[#1877F2] text-white font-bold py-5 rounded-3xl flex items-center justify-center gap-3 hover:scale-105 transition-all shadow-xl"
+                className="bg-[#1877F2] text-white font-bold py-4 md:py-5 rounded-2xl md:rounded-3xl flex items-center justify-center gap-2 md:gap-3 hover:scale-105 transition-all shadow-xl text-xs md:text-base"
               >
-                <Facebook size={24} />
+                <Facebook size={18} className="md:w-6 md:h-6" />
                 <span>Facebook</span>
               </button>
               <button
                 onClick={() => handleLogin(appleProvider)}
-                className="bg-white text-black font-bold py-5 rounded-3xl flex items-center justify-center gap-3 hover:scale-105 transition-all shadow-xl"
+                className="bg-white text-black font-bold py-4 md:py-5 rounded-2xl md:rounded-3xl flex items-center justify-center gap-2 md:gap-3 hover:scale-105 transition-all shadow-xl text-xs md:text-base"
               >
-                <Apple size={24} />
+                <Apple size={18} className="md:w-6 md:h-6" />
                 <span>Apple</span>
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-6 pt-10 border-t border-white/10">
-            <div className="flex flex-col items-center gap-2">
-              <Shield className="text-orange-500" size={24} />
-              <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">Non-Custodial</p>
+          <div className="grid grid-cols-3 gap-4 md:gap-6 pt-8 md:pt-10 border-t border-white/10">
+            <div className="flex flex-col items-center gap-1 md:gap-2">
+              <Shield className="text-orange-500 md:w-6 md:h-6" size={18} />
+              <p className="text-[8px] md:text-[10px] uppercase font-bold tracking-widest text-white/40">Non-Custodial</p>
             </div>
-            <div className="flex flex-col items-center gap-2">
-              <Globe className="text-blue-500" size={24} />
-              <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">Cross-Chain</p>
+            <div className="flex flex-col items-center gap-1 md:gap-2">
+              <Globe className="text-blue-500 md:w-6 md:h-6" size={18} />
+              <p className="text-[8px] md:text-[10px] uppercase font-bold tracking-widest text-white/40">Cross-Chain</p>
             </div>
-            <div className="flex flex-col items-center gap-2">
-              <Zap className="text-green-500" size={24} />
-              <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">Instant Settlement</p>
+            <div className="flex flex-col items-center gap-1 md:gap-2">
+              <Zap className="text-green-500 md:w-6 md:h-6" size={18} />
+              <p className="text-[8px] md:text-[10px] uppercase font-bold tracking-widest text-white/40">Instant Settlement</p>
             </div>
           </div>
         </motion.div>

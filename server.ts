@@ -21,22 +21,51 @@ if (fs.existsSync(firebaseConfigPath)) {
     
     if (!admin.apps.length) {
       try {
-        // Always prefer the projectId from the config file
-        admin.initializeApp({
-          projectId: firebaseConfig.projectId,
-        });
-        console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
+        // Try default initialization first - this is often best in managed environments
+        admin.initializeApp();
+        console.log("Firebase Admin initialized with default environment config");
       } catch (e) {
-        console.error("Firebase Admin initialization failed:", e);
+        console.warn("Default Firebase Admin initialization failed, trying with explicit projectId:", e);
+        try {
+          admin.initializeApp({
+            projectId: firebaseConfig.projectId,
+          });
+          console.log(`Firebase Admin initialized with explicit projectId: ${firebaseConfig.projectId}`);
+        } catch (e2) {
+          console.error("Critical: Firebase Admin initialization failed completely:", e2);
+        }
       }
     }
     
     const adminApp = admin.app();
     // Use the named database if provided, otherwise default
     const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-    db = getFirestore(adminApp, dbId);
     
-    console.log(`Firebase Admin initialized for database: ${dbId} in project: ${firebaseConfig.projectId}`);
+    try {
+      db = getFirestore(adminApp, dbId);
+      // Test the connection immediately with a write operation
+      await db.collection("health_check").doc("ping").set({ 
+        lastPing: new Date().toISOString(),
+        projectId: firebaseConfig.projectId,
+        databaseId: dbId
+      });
+      console.log(`Firebase Admin connected successfully to database: ${dbId}`);
+    } catch (e: any) {
+      console.error(`Failed to connect to named database ${dbId}, falling back to (default):`, e.message);
+      try {
+        db = getFirestore(adminApp, "(default)");
+        await db.collection("health_check").doc("ping").set({ 
+          lastPing: new Date().toISOString(),
+          projectId: firebaseConfig.projectId,
+          databaseId: "(default)"
+        });
+        console.log("Firebase Admin connected successfully to (default) database");
+      } catch (e2: any) {
+        console.error("Critical: Failed to connect to both named and (default) databases:", e2.message);
+      }
+    }
+    
+    console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
   } catch (e) {
     console.error("Critical failure during Firebase Admin initialization:", e);
   }
@@ -144,9 +173,12 @@ async function processBackgroundTrades() {
     }
     
     await batch.commit();
-    console.log("Background trades processed successfully");
-  } catch (error) {
-    console.error("Error in background trading loop:", error);
+    console.log(`Background trades processed successfully for ${tradingUsers.size} users`);
+  } catch (error: any) {
+    console.error("Error in background trading loop:", error.message || error);
+    if (error.code === 7 || error.message?.includes("PERMISSION_DENIED")) {
+      console.error("CRITICAL: Permission denied in background trading loop. Check Firebase Admin credentials and project permissions.");
+    }
   }
 }
 
@@ -247,6 +279,26 @@ async function startServer() {
       error,
       timestamp: new Date().toISOString()
     });
+  });
+
+  // Firebase Admin Status Endpoint
+  app.get("/api/admin/status", async (req, res) => {
+    if (!db) {
+      return res.json({ status: "error", message: "Firebase Admin not initialized" });
+    }
+    try {
+      const config = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+      const dbId = config.firestoreDatabaseId || "(default)";
+      const testDoc = await db.collection("health_check").doc("ping").get();
+      res.json({ 
+        status: "ok", 
+        projectId: config.projectId,
+        databaseId: dbId,
+        lastPing: testDoc.exists ? testDoc.data()?.lastPing : "none"
+      });
+    } catch (e: any) {
+      res.status(500).json({ status: "error", message: e.message });
+    }
   });
 
   // Crypto Prices Endpoint
