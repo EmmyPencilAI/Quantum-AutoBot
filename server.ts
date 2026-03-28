@@ -162,7 +162,7 @@ async function processBackgroundTrades() {
         const tradeRef = db.collection("trades").doc();
         batch.set(tradeRef, {
           uid: userData.uid,
-          pair: "BTC/USDT",
+          pair: userData.activePair || "BTC/USDT",
           type: actualProfit >= 0 ? "Buy" : "Sell",
           amount: Math.abs(actualProfit) * 10,
           price: 65000 + (Math.random() * 1000 - 500),

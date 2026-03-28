@@ -12,6 +12,7 @@ interface TradingTabProps {
 const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [isTrading, setIsTrading] = useState(false);
   const [strategy, setStrategy] = useState("Momentum");
+  const [selectedPair, setSelectedPair] = useState("BTC / USDT");
   const [pnl, setPnl] = useState(0);
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -25,6 +26,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         const data = doc.data();
         setIsTrading(data.isTrading || false);
         setStrategy(data.activeStrategy || "Momentum");
+        setSelectedPair(data.activePair || "BTC / USDT");
         setPnl(data.totalProfit || 0);
       }
     }, (error) => {
@@ -73,7 +75,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
         isTrading: !isTrading,
-        activeStrategy: strategy
+        activeStrategy: strategy,
+        activePair: selectedPair
       });
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
@@ -94,6 +97,24 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
     }
   };
+
+  const changePair = async (newPair: string) => {
+    if (!user || isTrading) return;
+    setSelectedPair(newPair);
+    try {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        activePair: newPair
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  };
+
+  const tradingPairs = [
+    "BTC / USDT", "ETH / USDT", "BNB / USDT", "SOL / USDT", "SUI / USDT",
+    "XRP / USDT", "ADA / USDT", "DOGE / USDT", "AVAX / USDT", "MATIC / USDT"
+  ];
 
   const strategies = [
     { name: "Aggressive", icon: Zap, color: "text-red-400", bg: "bg-red-400/10", desc: "High risk, high reward. Focuses on volatility." },
@@ -137,31 +158,55 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-        {/* Strategy Selection */}
-        <div className="lg:col-span-1 space-y-3 md:space-y-4">
-          <h3 className="text-sm md:text-lg font-bold tracking-tight mb-1 md:mb-4">Select Strategy</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2 md:gap-4">
-            {strategies.map((s) => (
-              <button
-                key={s.name}
-                onClick={() => changeStrategy(s.name)}
-                disabled={isTrading || loading}
-                className={`flex items-center gap-3 md:gap-4 p-3 md:p-5 rounded-xl md:rounded-3xl border transition-all text-left ${
-                  strategy === s.name
-                    ? "bg-white/5 border-orange-500 shadow-lg shadow-orange-500/10"
-                    : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
-                }`}
-              >
-                <div className={`w-8 h-8 md:w-12 md:h-12 shrink-0 ${s.bg} ${s.color} rounded-lg md:rounded-2xl flex items-center justify-center`}>
-                  <s.icon size={16} className="md:w-6 md:h-6" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-xs md:text-lg truncate">{s.name}</p>
-                  <p className="text-[8px] md:text-xs text-white/40 leading-tight line-clamp-1 md:line-clamp-2">{s.desc}</p>
-                </div>
-                {strategy === s.name && <ChevronRight className="text-orange-500 shrink-0 md:w-4 md:h-4" size={14} />}
-              </button>
-            ))}
+        {/* Pair & Strategy Selection */}
+        <div className="lg:col-span-1 space-y-4 md:space-y-6">
+          {/* Pair Selection */}
+          <div className="space-y-3 md:space-y-4">
+            <h3 className="text-sm md:text-lg font-bold tracking-tight mb-1 md:mb-4">Select Trading Pair</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {tradingPairs.map((pair) => (
+                <button
+                  key={pair}
+                  onClick={() => changePair(pair)}
+                  disabled={isTrading || loading}
+                  className={`py-2.5 md:py-3 px-3 md:px-4 rounded-xl md:rounded-2xl border text-[10px] md:text-sm font-bold transition-all ${
+                    selectedPair === pair
+                      ? "bg-orange-500 text-black border-orange-500 shadow-lg shadow-orange-500/20"
+                      : "bg-[#0a0a0a] border-white/10 text-white/60 hover:border-white/20"
+                  }`}
+                >
+                  {pair}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Strategy Selection */}
+          <div className="space-y-3 md:space-y-4">
+            <h3 className="text-sm md:text-lg font-bold tracking-tight mb-1 md:mb-4">Select Strategy</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2 md:gap-4">
+              {strategies.map((s) => (
+                <button
+                  key={s.name}
+                  onClick={() => changeStrategy(s.name)}
+                  disabled={isTrading || loading}
+                  className={`flex items-center gap-3 md:gap-4 p-3 md:p-5 rounded-xl md:rounded-3xl border transition-all text-left ${
+                    strategy === s.name
+                      ? "bg-white/5 border-orange-500 shadow-lg shadow-orange-500/10"
+                      : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
+                  }`}
+                >
+                  <div className={`w-8 h-8 md:w-12 md:h-12 shrink-0 ${s.bg} ${s.color} rounded-lg md:rounded-2xl flex items-center justify-center`}>
+                    <s.icon size={16} className="md:w-6 md:h-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-xs md:text-lg truncate">{s.name}</p>
+                    <p className="text-[8px] md:text-xs text-white/40 leading-tight line-clamp-1 md:line-clamp-2">{s.desc}</p>
+                  </div>
+                  {strategy === s.name && <ChevronRight className="text-orange-500 shrink-0 md:w-4 md:h-4" size={14} />}
+                </button>
+              ))}
+            </div>
           </div>
 
           <button
@@ -197,9 +242,15 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                   {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} <span className="text-base md:text-2xl opacity-60">USDT</span>
                 </h3>
               </div>
-              <div className="sm:text-right">
-                <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Strategy</p>
-                <p className="text-base md:text-xl font-bold text-orange-500">{strategy}</p>
+              <div className="sm:text-right flex flex-col sm:items-end gap-2">
+                <div>
+                  <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Pair</p>
+                  <p className="text-base md:text-xl font-bold text-white">{selectedPair}</p>
+                </div>
+                <div>
+                  <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Strategy</p>
+                  <p className="text-base md:text-xl font-bold text-orange-500">{strategy}</p>
+                </div>
               </div>
             </div>
 
