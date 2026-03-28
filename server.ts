@@ -6,37 +6,47 @@ import { fileURLToPath } from "url";
 import { ethers } from "ethers";
 import dotenv from "dotenv";
 import admin from "firebase-admin";
+import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
 
 dotenv.config();
 
 // Load Firebase Config
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
-let db: admin.firestore.Firestore | null = null;
+let db: any = null;
 
 if (fs.existsSync(firebaseConfigPath)) {
   try {
     const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-    admin.initializeApp({
+    const app = admin.initializeApp({
       credential: admin.credential.applicationDefault(), // This might fail if no default creds
       projectId: firebaseConfig.projectId,
     });
+    
     // Fallback if applicationDefault fails (common in this environment)
-    if (!admin.apps.length) {
-       admin.initializeApp({
-         projectId: firebaseConfig.projectId,
-       });
-    }
-    db = admin.firestore(admin.app());
+    // Note: admin.apps.length check might be tricky if we already initialized above
+    
     // Use the specific database ID if provided
-    if (firebaseConfig.firestoreDatabaseId) {
-      // Note: firebase-admin doesn't easily support named databases in the same way as the client SDK
-      // without specific configuration, but usually the default is fine or it's handled by the project.
-      // For now, we'll just use the default firestore instance.
-    }
-    console.log("Firebase Admin initialized in server");
+    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+    db = getFirestore(app, dbId);
+    
+    console.log(`Firebase Admin initialized in server for database: ${dbId}`);
   } catch (e) {
     console.error("Failed to initialize Firebase Admin:", e);
+    // Try one more time with just projectId if it failed
+    try {
+      const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+      if (!admin.apps.length) {
+        const app = admin.initializeApp({
+          projectId: firebaseConfig.projectId,
+        });
+        const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+        db = getFirestore(app, dbId);
+        console.log(`Firebase Admin initialized (fallback) for database: ${dbId}`);
+      }
+    } catch (err) {
+      console.error("Fallback Firebase Admin initialization failed:", err);
+    }
   }
 }
 
@@ -196,6 +206,16 @@ async function startServer() {
       const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false${apiKey ? `&x_cg_demo_api_key=${apiKey}` : ""}`;
       
       const response = await fetch(url);
+      
+      if (!response.ok) {
+        const text = await response.text();
+        console.warn(`CoinGecko API returned status ${response.status}: ${text}`);
+        if (response.status === 429) {
+          return res.status(429).json({ error: "Rate limit exceeded. Please try again later." });
+        }
+        throw new Error(`API returned ${response.status}`);
+      }
+      
       const data = await response.json();
       res.json(data);
     } catch (error) {

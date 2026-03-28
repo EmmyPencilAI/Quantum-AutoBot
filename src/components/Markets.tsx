@@ -58,6 +58,9 @@ export const Markets: React.FC = () => {
     const fetchPrices = async () => {
       try {
         const response = await fetch('/api/prices');
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}`);
+        }
         const data = await response.json();
         if (Array.isArray(data)) {
           setCoins(data);

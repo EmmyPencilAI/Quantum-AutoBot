@@ -85,10 +85,15 @@ export function TradingDashboard({
         })
       });
       
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (e) {
+        throw new Error(`Server returned invalid response (${response.status})`);
+      }
       
       if (!response.ok) {
-        throw new Error(data.error || "Server error during settlement");
+        throw new Error(data.error || `Server error during settlement (${response.status})`);
       }
       
       if (data.error) {
