@@ -20,28 +20,24 @@ const TradingViewWidget: React.FC<{ symbol: string }> = ({ symbol }) => {
     script.src = "https://s3.tradingview.com/tv.js";
     script.async = true;
     script.onload = () => {
-      if (window.TradingView) {
-        let origin = "";
-        try {
-          origin = window.location.origin;
-        } catch (e) {
-          console.warn("Could not access window.location.origin for TradingView widget", e);
+      try {
+        if (window.TradingView) {
+          new window.TradingView.widget({
+            "autosize": true,
+            "symbol": symbol,
+            "interval": "D",
+            "timezone": "Etc/UTC",
+            "theme": "dark",
+            "style": "1",
+            "locale": "en",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "allow_symbol_change": true,
+            "container_id": containerId
+          });
         }
-
-        new window.TradingView.widget({
-          "autosize": true,
-          "symbol": symbol,
-          "interval": "D",
-          "timezone": "Etc/UTC",
-          "theme": "dark",
-          "style": "1",
-          "locale": "en",
-          "toolbar_bg": "#f1f3f6",
-          "enable_publishing": false,
-          "allow_symbol_change": true,
-          "container_id": containerId,
-          ...(origin ? { "origin": origin } : {})
-        });
+      } catch (e) {
+        console.warn("TradingView widget initialization restricted by cross-origin policy:", e);
       }
     };
     document.head.appendChild(script);
@@ -74,7 +70,7 @@ export const Markets: React.FC = () => {
     };
 
     fetchPrices();
-    const interval = setInterval(fetchPrices, 30000); // Refresh every 30s
+    const interval = setInterval(fetchPrices, 300000); // Refresh every 5 mins
     return () => clearInterval(interval);
   }, []);
 

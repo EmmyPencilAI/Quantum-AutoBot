@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { User, Camera, Bell, Shield, LogOut, X, Check } from "lucide-react";
@@ -16,11 +16,20 @@ const AVATAR_STYLES = [
 ];
 
 export function Settings({ userProfile, showConfirm, notify }: SettingsProps) {
+  console.log("Settings Render:", { hasProfile: !!userProfile, username: userProfile?.username });
   const [username, setUsername] = useState(userProfile?.username || "");
   const [isUpdating, setIsUpdating] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [notifications, setNotifications] = useState(userProfile?.notifications ?? true);
   const [privacyMode, setPrivacyMode] = useState(userProfile?.privacyMode ?? false);
+
+  useEffect(() => {
+    if (userProfile) {
+      setUsername(userProfile.username || "");
+      setNotifications(userProfile.notifications ?? true);
+      setPrivacyMode(userProfile.privacyMode ?? false);
+    }
+  }, [userProfile]);
 
   const handleUpdate = async (updates: any) => {
     if (!userProfile) {
@@ -68,10 +77,10 @@ export function Settings({ userProfile, showConfirm, notify }: SettingsProps) {
   const handleDisconnect = () => {
     showConfirm("Disconnect Wallet", "Are you sure you want to disconnect? This will reload the application.", () => {
       try {
-        window.location.reload();
+        // Safer reload for iframe environments
+        window.location.href = window.location.pathname + window.location.search;
       } catch (e) {
         console.error("Failed to reload:", e);
-        // Fallback or just ignore if in cross-origin frame
       }
     });
   };

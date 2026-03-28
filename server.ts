@@ -5,11 +5,64 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { ethers } from "ethers";
 import dotenv from "dotenv";
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, addDoc } from "firebase/firestore";
+import fs from "fs";
 
 dotenv.config();
 
+// Load Firebase Config
+const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+let firebaseApp;
+let db: any;
+
+if (fs.existsSync(firebaseConfigPath)) {
+  const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+  firebaseApp = initializeApp(firebaseConfig);
+  db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+  console.log("Firebase initialized in server");
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Community Bot Logic
+const BOT_MESSAGES = [
+  "Market update: BTC showing strong support at 65k. Momentum strategy looking good!",
+  "New trading pair added: SOL/USDT. Check it out in the dashboard.",
+  "Quantum Treasury just settled 500 USDT in profits. Distributed 50/50!",
+  "Strategy Tip: Aggressive strategy works best in high volatility markets.",
+  "Welcome to the Quantum Finance community! Share your insights below.",
+  "Leaderboard update: Top trader just hit +10,000 USDT profit!",
+  "Quantum Finance is now fully integrated with Binance Smart Chain Testnet.",
+  "Did you know? Our Quantum engine uses advanced AI to optimize trade entries.",
+];
+
+async function postBotMessage() {
+  if (!db) return;
+  try {
+    const message = BOT_MESSAGES[Math.floor(Math.random() * BOT_MESSAGES.length)];
+    await addDoc(collection(db, "posts"), {
+      authorUid: "system-bot",
+      authorName: "Quantum Bot",
+      authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
+      authorWallet: "0x0000000000000000000000000000000000000000",
+      content: message,
+      likes: Math.floor(Math.random() * 10),
+      createdAt: new Date().toISOString()
+    });
+    console.log("Bot posted message:", message);
+  } catch (error) {
+    console.error("Bot failed to post:", error);
+  }
+}
+
+// Post every 30 minutes
+if (db) {
+  setInterval(postBotMessage, 1800000);
+  // Post one immediately on start
+  setTimeout(postBotMessage, 5000);
+}
 
 // Contract Config (Mirroring src/config.ts)
 const RPC_URL = "https://data-seed-prebsc-1-s1.binance.org:8545/";
@@ -30,6 +83,10 @@ async function startServer() {
   app.post("/api/trading/simulate", async (req, res) => {
     const { strategy, principal, duration, account } = req.body;
     
+    if (isNaN(principal) || principal <= 0) {
+        return res.status(400).json({ error: "Invalid principal amount" });
+    }
+
     // Simple simulation logic based on strategy
     let multiplier = 1.0;
     let risk = 0.05;
@@ -89,6 +146,7 @@ async function startServer() {
         // Convert to Wei (18 decimals) safely
         // We use a fixed precision string to avoid scientific notation and pattern issues
         const balanceStr = finalBalanceFormatted.toFixed(18);
+        console.log(`Settlement: account=${account}, balanceStr=${balanceStr}`);
         const finalBalanceWei = ethers.parseUnits(balanceStr, 18);
         
         const tx = await contract.settle(account, finalBalanceWei);

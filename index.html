@@ -4,6 +4,35 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Quantum Finance</title>
+    <script>
+      // Early error suppression for cross-origin frame access
+      // This is common in preview environments where third-party scripts (like TradingView)
+      // try to access the parent/top frame.
+      window.addEventListener('error', function(event) {
+        if (event.message && (
+          event.message.indexOf('Blocked a frame with origin') !== -1 ||
+          event.message.indexOf("read a named property 'origin' from 'Location'") !== -1 ||
+          event.message.indexOf('cross-origin frame') !== -1
+        )) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          console.warn('Suppressed cross-origin frame error:', event.message);
+          return true;
+        }
+      }, true);
+
+      // Also intercept unhandled promise rejections
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event.reason && event.reason.message && (
+          event.reason.message.indexOf('Blocked a frame with origin') !== -1 ||
+          event.reason.message.indexOf("read a named property 'origin' from 'Location'") !== -1
+        )) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          console.warn('Suppressed cross-origin promise rejection:', event.reason.message);
+        }
+      }, true);
+    </script>
   </head>
   <body>
     <div id="root"></div>

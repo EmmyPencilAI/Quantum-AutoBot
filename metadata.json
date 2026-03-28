@@ -1,7 +1,5 @@
 {
   "name": "Quantum Finance",
   "description": "Non-custodial USDT auto-trading dApp on BNB Chain. Retain custody, trade smart, share profits.",
-  "requestFramePermissions": [
-    "geolocation"
-  ]
+  "requestFramePermissions": []
 }

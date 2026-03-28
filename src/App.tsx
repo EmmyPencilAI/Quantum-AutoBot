@@ -38,6 +38,18 @@ interface ModalConfig {
   placeholder?: string;
 }
 
+interface UserProfile {
+  uid: string;
+  username?: string;
+  avatar?: string;
+  totalProfit?: number;
+  lastActive?: string;
+  role?: string;
+  notifications?: boolean;
+  privacyMode?: boolean;
+  walletAddress?: string;
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("wallet");
   const [account, setAccount] = useState<string | null>(null);
@@ -174,19 +186,41 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log("Auth State Changed:", user ? "User logged in" : "User logged out", user?.uid);
       setIsAuthReady(true);
     });
-    return () => unsubscribe();
+
+    // Suppress cross-origin frame access errors in preview environment
+    const handleError = (event: ErrorEvent) => {
+      if (event.message && (
+        event.message.includes("Blocked a frame with origin") || 
+        event.message.includes("Failed to read a named property 'origin' from 'Location'")
+      )) {
+        console.warn("Cross-origin frame access blocked (expected in preview environment):", event.message);
+        event.preventDefault();
+      }
+    };
+    window.addEventListener('error', handleError);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('error', handleError);
+    };
   }, []);
 
   // Real-time User Profile Sync (Firestore)
   useEffect(() => {
+    console.log("Profile Sync Effect:", { isAuthReady, account, hasUser: !!auth.currentUser });
     if (isAuthReady && account && auth.currentUser) {
       const profileRef = doc(db, "users", auth.currentUser.uid);
       const unsub = onSnapshot(profileRef, (docSnap) => {
+        console.log("Profile Snapshot:", docSnap.exists() ? "exists" : "not exists", docSnap.id);
         if (docSnap.exists()) {
-          setUserProfile({ uid: auth.currentUser.uid, ...docSnap.data() });
+          const data = docSnap.data();
+          console.log("Profile Data:", data);
+          setUserProfile({ uid: auth.currentUser.uid, ...data } as UserProfile);
         } else {
+          console.log("Creating new profile for:", account);
           // Create profile if it doesn't exist
           const newProfile = {
             walletAddress: account.toLowerCase(),
