@@ -57,9 +57,22 @@ const App: React.FC = () => {
 
   const handleLogin = async (provider: any) => {
     try {
+      setLoading(true);
       await signInWithPopup(auth, provider);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Login failed:", e);
+      // Log specific error codes to help debugging
+      if (e.code === 'auth/popup-blocked') {
+        alert("Please enable popups for this site to sign in.");
+      } else if (e.code === 'auth/operation-not-allowed') {
+        alert("This sign-in provider is not enabled in your Firebase Console.");
+      } else if (e.code === 'auth/unauthorized-domain') {
+        alert("This domain is not authorized in Firebase. Add " + window.location.hostname + " to Authorized Domains in Firebase Console.");
+      } else {
+        alert("Login error: " + e.message);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
