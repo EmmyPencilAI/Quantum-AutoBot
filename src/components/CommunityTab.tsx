@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { MessageSquare, Heart, Share2, Plus, Send, MoreHorizontal, UserPlus, TrendingUp, Search } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { db } from "../firebase";
+import { db, handleFirestoreError, OperationType } from "../firebase";
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, increment } from "firebase/firestore";
 
 interface CommunityTabProps {
@@ -18,6 +18,8 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const postsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setPosts(postsData);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "posts");
     });
     return () => unsubscribe();
   }, []);
@@ -25,8 +27,9 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
   const handleCreatePost = async () => {
     if (!newPost.trim() || !user) return;
     setLoading(true);
+    const path = "posts";
     try {
-      await addDoc(collection(db, "posts"), {
+      await addDoc(collection(db, path), {
         authorUid: user.uid,
         authorName: user.displayName || "Quantum Trader",
         authorAvatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
@@ -37,20 +40,21 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
       });
       setNewPost("");
     } catch (e) {
-      console.error("Error creating post:", e);
+      handleFirestoreError(e, OperationType.CREATE, path);
     } finally {
       setLoading(false);
     }
   };
 
   const handleLike = async (postId: string) => {
+    const path = `posts/${postId}`;
     try {
       const postRef = doc(db, "posts", postId);
       await updateDoc(postRef, {
         likesCount: increment(1),
       });
     } catch (e) {
-      console.error("Error liking post:", e);
+      handleFirestoreError(e, OperationType.UPDATE, path);
     }
   };
 

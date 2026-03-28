@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { auth, googleProvider, facebookProvider, appleProvider, db } from "./firebase";
+import { auth, googleProvider, facebookProvider, appleProvider, db, handleFirestoreError, OperationType } from "./firebase";
 import { onAuthStateChanged, signInWithPopup } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { TrendingUp, Shield, Globe, Zap, ArrowRight, Chrome, Facebook, Apple } from "lucide-react";
@@ -21,27 +21,32 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // Ensure user document exists in Firestore
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        
-        if (!userSnap.exists()) {
-          const keypair = deriveSuiWallet(user.uid);
-          await setDoc(userRef, {
-            uid: user.uid,
-            username: user.displayName || "Quantum Trader",
-            avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-            suiWallet: keypair.toSuiAddress(),
-            suiBalance: 0,
-            usdtBalance: 1000, // Starting demo balance
-            totalProfit: 0,
-            activeStrategy: "None",
-            isTrading: false,
-            region: "Global",
-            createdAt: new Date().toISOString(),
-          });
+        const path = `users/${user.uid}`;
+        try {
+          // Ensure user document exists in Firestore
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          
+          if (!userSnap.exists()) {
+            const keypair = deriveSuiWallet(user.uid);
+            await setDoc(userRef, {
+              uid: user.uid,
+              username: user.displayName || "Quantum Trader",
+              avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+              suiWallet: keypair.toSuiAddress(),
+              suiBalance: 0,
+              usdtBalance: 1000, // Starting demo balance
+              totalProfit: 0,
+              activeStrategy: "None",
+              isTrading: false,
+              region: "Global",
+              createdAt: new Date().toISOString(),
+            });
+          }
+          setUser(user);
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, path);
         }
-        setUser(user);
       } else {
         setUser(null);
       }

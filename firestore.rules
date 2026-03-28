@@ -16,15 +16,22 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'username', 'suiWallet']) &&
              data.uid is string && data.uid.size() > 0 &&
-             data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
-             data.suiWallet is string && data.suiWallet.size() > 0;
+             data.username is string && data.username.size() > 0 && data.username.size() < 100 &&
+             data.suiWallet is string && data.suiWallet.size() > 0 &&
+             (data.avatar is string || !('avatar' in data)) &&
+             (data.suiBalance is number || !('suiBalance' in data)) &&
+             (data.usdtBalance is number || !('usdtBalance' in data));
     }
 
     function isValidPost(data) {
       return data.keys().hasAll(['authorUid', 'content', 'createdAt']) &&
              data.authorUid is string &&
-             data.content is string && data.content.size() > 0 && data.content.size() < 1000 &&
-             data.createdAt is string;
+             data.content is string && data.content.size() > 0 && data.content.size() < 2000 &&
+             data.createdAt is string &&
+             (data.authorName is string || !('authorName' in data)) &&
+             (data.authorAvatar is string || !('authorAvatar' in data)) &&
+             (data.likesCount is number || !('likesCount' in data)) &&
+             (data.commentsCount is number || !('commentsCount' in data));
     }
 
     function isValidTrade(data) {
@@ -32,8 +39,8 @@ service cloud.firestore {
              data.uid is string &&
              data.pair is string &&
              data.type in ['Buy', 'Sell'] &&
-             data.amount is number && data.amount > 0 &&
-             data.price is number && data.price > 0 &&
+             data.amount is number && data.amount >= 0 &&
+             data.price is number && data.price >= 0 &&
              data.timestamp is string;
     }
 
@@ -60,7 +67,11 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if true;
       allow create: if isAuthenticated() && isValidPost(request.resource.data);
-      allow update: if isAuthenticated() && (request.auth.uid == resource.data.authorUid || request.auth.uid == 'admin');
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == resource.data.authorUid || request.auth.uid == 'admin') ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount']) && 
+         request.resource.data.likesCount == resource.data.likesCount + 1)
+      );
       allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorUid || request.auth.uid == 'admin');
     }
 
