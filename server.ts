@@ -21,14 +21,13 @@ if (fs.existsSync(firebaseConfigPath)) {
     
     if (!admin.apps.length) {
       try {
-        // Standard initialization for Cloud Run
-        admin.initializeApp();
-        console.log("Firebase Admin initialized with default credentials");
-      } catch (e) {
-        console.warn("Default initialization failed, trying with projectId:", e);
+        // Always prefer the projectId from the config file
         admin.initializeApp({
           projectId: firebaseConfig.projectId,
         });
+        console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
+      } catch (e) {
+        console.error("Firebase Admin initialization failed:", e);
       }
     }
     
@@ -58,24 +57,9 @@ const BOT_MESSAGES = [
   "Did you know? Our Quantum engine uses advanced AI to optimize trade entries.",
 ];
 
-import { initializeApp as initializeClientApp } from "firebase/app";
-import { getFirestore as getClientFirestore, collection as clientCollection, addDoc as clientAddDoc } from "firebase/firestore";
-import { getAuth as getClientAuth, signInAnonymously } from "firebase/auth";
-
-// ... inside startServer or at top level ...
-let clientDb: any = null;
-if (fs.existsSync(firebaseConfigPath)) {
-  const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-  const clientApp = initializeClientApp(firebaseConfig);
-  clientDb = getClientFirestore(clientApp, firebaseConfig.firestoreDatabaseId);
-  const clientAuth = getClientAuth(clientApp);
-  signInAnonymously(clientAuth).catch(err => console.error("Bot auth failed:", err));
-  console.log("Firebase Client SDK initialized for bot fallback with anonymous auth");
-}
-
 async function postBotMessage() {
-  if (!clientDb) {
-    console.warn("Bot skipped post: Client Firestore not initialized");
+  if (!db) {
+    console.warn("Bot skipped post: Firestore Admin not initialized");
     return;
   }
   try {
@@ -86,20 +70,20 @@ async function postBotMessage() {
       authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
       authorWallet: "0x0000000000000000000000000000000000000000",
       content: message,
-      likes: Math.floor(Math.random() * 10),
+      likesCount: Math.floor(Math.random() * 10),
       createdAt: new Date().toISOString()
     };
     
-    console.log("Bot (Client SDK) attempting to post:", JSON.stringify(postData));
-    await clientAddDoc(clientCollection(clientDb, "posts"), postData);
-    console.log("Bot (Client SDK) posted successfully:", message);
+    console.log("Bot (Admin SDK) attempting to post:", JSON.stringify(postData));
+    await db.collection("posts").add(postData);
+    console.log("Bot (Admin SDK) posted successfully:", message);
   } catch (error: any) {
-    console.error("Bot (Client SDK) failed to post:", error.message || error);
+    console.error("Bot (Admin SDK) failed to post:", error.message || error);
   }
 }
 
 // Post every 15 minutes
-if (clientDb) {
+if (db) {
   setInterval(postBotMessage, 900000);
   // Post one immediately on start
   setTimeout(postBotMessage, 5000);
