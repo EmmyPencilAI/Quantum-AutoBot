@@ -27,13 +27,27 @@ const App: React.FC = () => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       try {
         if (user) {
+          console.log("User authenticated:", user.uid);
           const path = `users/${user.uid}`;
           try {
             // Ensure user document exists in Firestore
             const userRef = doc(db, "users", user.uid);
-            const userSnap = await getDoc(userRef);
+            
+            // Try to get document from server first to ensure connectivity
+            let userSnap;
+            try {
+              userSnap = await getDoc(userRef);
+            } catch (e: any) {
+              if (e.message?.includes("offline")) {
+                console.warn("Firestore is offline, trying cache...");
+                userSnap = await getDoc(userRef);
+              } else {
+                throw e;
+              }
+            }
             
             if (!userSnap.exists()) {
+              console.log("Creating new user profile...");
               const keypair = deriveSuiWallet(user.uid);
               await setDoc(userRef, {
                 uid: user.uid,
@@ -51,6 +65,7 @@ const App: React.FC = () => {
             }
             setUser(user);
           } catch (error) {
+            console.error("Firestore operation failed:", error);
             handleFirestoreError(error, OperationType.WRITE, path);
           }
         } else {

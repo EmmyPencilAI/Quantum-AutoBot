@@ -16,10 +16,12 @@ const MarketsTab: React.FC = () => {
     script.async = true;
     script.onload = () => {
       if (container.current && window.TradingView) {
+        // Adjust height based on screen size
+        const height = window.innerWidth < 640 ? 300 : 500;
         new window.TradingView.widget({
           container_id: container.current.id,
           width: "100%",
-          height: 500,
+          height: height,
           symbol: "BINANCE:BTCUSDT",
           interval: "D",
           timezone: "Etc/UTC",
@@ -28,7 +30,7 @@ const MarketsTab: React.FC = () => {
           locale: "en",
           toolbar_bg: "#f1f3f6",
           enable_publishing: false,
-          hide_side_toolbar: false,
+          hide_side_toolbar: window.innerWidth < 640,
           allow_symbol_change: true,
           details: true,
           hotlist: true,
@@ -58,53 +60,53 @@ const MarketsTab: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-        <h2 className="text-3xl font-bold tracking-tight">Global Markets</h2>
-        <div className="relative w-full md:w-96">
+    <div className="space-y-4 md:space-y-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Global Markets</h2>
+        <div className="relative w-full sm:w-80 md:w-96">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" size={18} />
           <input
             type="text"
-            placeholder="Search assets (BTC, ETH, SOL...)"
-            className="w-full bg-[#0a0a0a] border border-white/10 rounded-2xl pl-12 pr-4 py-3 focus:outline-none focus:border-orange-500 transition-all"
+            placeholder="Search assets..."
+            className="w-full bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-2xl pl-12 pr-4 py-3 focus:outline-none focus:border-orange-500 transition-all text-sm md:text-base"
           />
         </div>
       </div>
 
       {/* TradingView Widget */}
-      <div className="bg-[#0a0a0a] border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+      <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl">
         <div id="tradingview_widget" ref={container} className="w-full" />
       </div>
 
       {/* Market Overview Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
         {marketData.map((asset) => (
           <div
             key={asset.symbol}
-            className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-6 hover:border-orange-500/50 transition-all group cursor-pointer"
+            className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-orange-500/50 transition-all group cursor-pointer"
           >
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-3 md:mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center font-bold text-orange-500">
+                <div className="w-8 h-8 md:w-10 md:h-10 bg-white/5 rounded-lg md:rounded-xl flex items-center justify-center font-bold text-orange-500 text-sm md:text-base">
                   {asset.symbol[0]}
                 </div>
-                <div>
-                  <p className="font-bold">{asset.name}</p>
-                  <p className="text-xs text-white/40">{asset.symbol}/USDT</p>
+                <div className="min-w-0">
+                  <p className="font-bold text-sm md:text-base truncate">{asset.name}</p>
+                  <p className="text-[10px] md:text-xs text-white/40 truncate">{asset.symbol}/USDT</p>
                 </div>
               </div>
-              <div className={`text-right ${asset.up ? "text-green-400" : "text-red-400"}`}>
-                <div className="flex items-center justify-end gap-1 font-bold">
-                  {asset.up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+              <div className={`text-right shrink-0 ${asset.up ? "text-green-400" : "text-red-400"}`}>
+                <div className="flex items-center justify-end gap-1 font-bold text-xs md:text-sm">
+                  {asset.up ? <TrendingUp size={12} className="md:w-[14px] md:h-[14px]" /> : <TrendingDown size={12} className="md:w-[14px] md:h-[14px]" />}
                   <span>{asset.change}</span>
                 </div>
-                <p className="text-xs opacity-60">24h</p>
+                <p className="text-[10px] opacity-60">24h</p>
               </div>
             </div>
             <div className="flex items-end justify-between">
-              <h3 className="text-2xl font-bold tracking-tight">${asset.price}</h3>
-              <button className="text-white/20 hover:text-white transition-colors">
-                <Info size={18} />
+              <h3 className="text-xl md:text-2xl font-bold tracking-tight">${asset.price}</h3>
+              <button className="text-white/20 hover:text-white transition-colors shrink-0">
+                <Info size={16} className="md:w-[18px] md:h-[18px]" />
               </button>
             </div>
           </div>

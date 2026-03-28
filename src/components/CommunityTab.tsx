@@ -59,91 +59,91 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
       {/* Feed Section */}
-      <div className="lg:col-span-2 space-y-6">
+      <div className="lg:col-span-2 space-y-4 md:space-y-6">
         {/* Create Post */}
-        <div className="bg-[#0a0a0a] border border-white/10 rounded-3xl p-6 shadow-2xl">
-          <div className="flex gap-4 mb-4">
+        <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-2xl">
+          <div className="flex gap-3 md:gap-4 mb-4">
             <img
               src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
               alt="Avatar"
-              className="w-12 h-12 rounded-full bg-white/5"
+              className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/5 shrink-0"
               referrerPolicy="no-referrer"
             />
             <textarea
               placeholder="Share your trading insights..."
               value={newPost}
               onChange={(e) => setNewPost(e.target.value)}
-              className="flex-1 bg-white/5 border border-white/10 rounded-2xl p-4 focus:outline-none focus:border-orange-500 transition-all resize-none h-24 text-sm"
+              className="flex-1 bg-white/5 border border-white/10 rounded-xl md:rounded-2xl p-3 md:p-4 focus:outline-none focus:border-orange-500 transition-all resize-none h-20 md:h-24 text-xs md:text-sm"
             />
           </div>
-          <div className="flex items-center justify-between border-t border-white/5 pt-4">
-            <div className="flex gap-2">
-              <button className="text-white/40 hover:text-orange-500 transition-colors p-2 rounded-lg hover:bg-white/5">
-                <TrendingUp size={20} />
+          <div className="flex items-center justify-between border-t border-white/5 pt-3 md:pt-4">
+            <div className="flex gap-1 md:gap-2">
+              <button className="text-white/40 hover:text-orange-500 transition-colors p-2 rounded-lg hover:bg-white/5 shrink-0">
+                <TrendingUp size={18} className="md:w-5 md:h-5" />
               </button>
-              <button className="text-white/40 hover:text-orange-500 transition-colors p-2 rounded-lg hover:bg-white/5">
-                <Plus size={20} />
+              <button className="text-white/40 hover:text-orange-500 transition-colors p-2 rounded-lg hover:bg-white/5 shrink-0">
+                <Plus size={18} className="md:w-5 md:h-5" />
               </button>
             </div>
             <button
               onClick={handleCreatePost}
               disabled={loading || !newPost.trim()}
-              className="bg-orange-500 text-black font-bold px-6 py-2 rounded-xl flex items-center gap-2 hover:scale-105 transition-all disabled:opacity-50"
+              className="bg-orange-500 text-black font-bold px-4 md:px-6 py-2 rounded-lg md:rounded-xl flex items-center gap-2 hover:scale-[1.02] transition-all disabled:opacity-50 text-sm md:text-base"
             >
-              <Send size={18} />
+              <Send size={16} className="md:w-[18px] md:h-[18px]" />
               <span>Post</span>
             </button>
           </div>
         </div>
 
         {/* Feed */}
-        <div className="space-y-6">
+        <div className="space-y-4 md:space-y-6">
           <AnimatePresence>
             {posts.map((post) => (
               <motion.div
                 key={post.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-[#0a0a0a] border border-white/10 rounded-3xl p-6 hover:border-white/20 transition-all group"
+                className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-6 hover:border-white/20 transition-all group"
               >
-                <div className="flex items-start justify-between mb-6">
-                  <div className="flex items-center gap-4">
+                <div className="flex items-start justify-between mb-4 md:mb-6">
+                  <div className="flex items-center gap-3 md:gap-4 min-w-0">
                     <img
                       src={post.authorAvatar}
                       alt={post.authorName}
-                      className="w-12 h-12 rounded-full bg-white/5"
+                      className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/5 shrink-0"
                       referrerPolicy="no-referrer"
                     />
-                    <div>
-                      <p className="font-bold text-lg hover:text-orange-500 cursor-pointer transition-colors">
+                    <div className="min-w-0">
+                      <p className="font-bold text-base md:text-lg hover:text-orange-500 cursor-pointer transition-colors truncate">
                         {post.authorName}
                       </p>
-                      <p className="text-xs text-white/40">
+                      <p className="text-[10px] md:text-xs text-white/40 truncate">
                         {new Date(post.createdAt).toLocaleDateString()} • Just now
                       </p>
                     </div>
                   </div>
-                  <button className="text-white/20 hover:text-white transition-colors">
-                    <MoreHorizontal size={20} />
+                  <button className="text-white/20 hover:text-white transition-colors shrink-0">
+                    <MoreHorizontal size={18} className="md:w-5 md:h-5" />
                   </button>
                 </div>
-                <p className="text-white/80 leading-relaxed mb-6 whitespace-pre-wrap">{post.content}</p>
-                <div className="flex items-center gap-6 border-t border-white/5 pt-6">
+                <p className="text-white/80 leading-relaxed mb-4 md:mb-6 whitespace-pre-wrap text-sm md:text-base">{post.content}</p>
+                <div className="flex items-center gap-4 md:gap-6 border-t border-white/5 pt-4 md:pt-6">
                   <button
                     onClick={() => handleLike(post.id)}
-                    className="flex items-center gap-2 text-white/40 hover:text-red-400 transition-colors group/btn"
+                    className="flex items-center gap-2 text-white/40 hover:text-red-400 transition-colors group/btn shrink-0"
                   >
-                    <Heart size={20} className="group-hover/btn:fill-red-400" />
-                    <span className="text-sm font-bold">{post.likesCount || 0}</span>
+                    <Heart size={18} className="md:w-5 md:h-5 group-hover/btn:fill-red-400" />
+                    <span className="text-xs md:text-sm font-bold">{post.likesCount || 0}</span>
                   </button>
-                  <button className="flex items-center gap-2 text-white/40 hover:text-blue-400 transition-colors group/btn">
-                    <MessageSquare size={20} className="group-hover/btn:fill-blue-400" />
-                    <span className="text-sm font-bold">{post.commentsCount || 0}</span>
+                  <button className="flex items-center gap-2 text-white/40 hover:text-blue-400 transition-colors group/btn shrink-0">
+                    <MessageSquare size={18} className="md:w-5 md:h-5 group-hover/btn:fill-blue-400" />
+                    <span className="text-xs md:text-sm font-bold">{post.commentsCount || 0}</span>
                   </button>
-                  <button className="flex items-center gap-2 text-white/40 hover:text-green-400 transition-colors group/btn ml-auto">
-                    <Share2 size={20} />
+                  <button className="flex items-center gap-2 text-white/40 hover:text-green-400 transition-colors group/btn ml-auto shrink-0">
+                    <Share2 size={18} className="md:w-5 md:h-5" />
                   </button>
                 </div>
               </motion.div>
@@ -152,8 +152,8 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
         </div>
       </div>
 
-      {/* Sidebar Section */}
-      <div className="hidden lg:block space-y-8">
+      {/* Sidebar Section (Visible on LG, below on MD) */}
+      <div className="hidden lg:block space-y-6 md:space-y-8">
         {/* Search */}
         <div className="relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" size={18} />

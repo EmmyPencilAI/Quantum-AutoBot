@@ -102,18 +102,20 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, user
           </AnimatePresence>
         </div>
 
-        {/* Bottom Nav (Mobile) */}
-        <nav className="md:hidden flex justify-around p-3 bg-[#0a0a0a] border-t border-white/10">
+        {/* Bottom Nav (Mobile/Watch/Car) */}
+        <nav className="md:hidden flex justify-around p-2 bg-[#0a0a0a] border-t border-white/10 overflow-x-auto scrollbar-hide">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-col items-center gap-1 transition-all ${
+              className={`flex flex-col items-center justify-center gap-1 min-w-[50px] px-2 py-1 transition-all ${
                 activeTab === tab.id ? "text-orange-500" : "text-white/40"
               }`}
             >
-              <tab.icon size={20} />
-              <span className="text-[10px] uppercase font-bold tracking-tighter">{tab.name}</span>
+              <tab.icon size={22} className="shrink-0" />
+              <span className="text-[9px] uppercase font-bold tracking-tighter watch-hide truncate max-w-[60px]">
+                {tab.name}
+              </span>
             </button>
           ))}
         </nav>

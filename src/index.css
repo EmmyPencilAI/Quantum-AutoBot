@@ -7,14 +7,21 @@
 }
 
 @layer base {
+  :root {
+    /* Fluid typography: 14px at 320px -> 18px at 1920px */
+    font-size: clamp(0.875rem, 0.8rem + 0.375vw, 1.125rem);
+  }
+
   body {
-    @apply bg-[#050505] text-white selection:bg-orange-500 selection:text-black;
+    @apply bg-[#050505] text-white selection:bg-orange-500 selection:text-black antialiased;
+    /* Ensure touch targets are large enough for car screens/watches */
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* Custom Scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 4px;
+    height: 4px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
@@ -25,6 +32,21 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.2);
+  }
+}
+
+/* Watch/Extreme Small Device Support */
+@media (max-width: 320px) {
+  .watch-hide { display: none !important; }
+  .watch-text-xs { font-size: 0.65rem !important; }
+  .watch-p-2 { padding: 0.5rem !important; }
+}
+
+/* Car Screen / Large Touch Support */
+@media (pointer: coarse) {
+  button, a {
+    min-height: 44px;
+    min-width: 44px;
   }
 }
 

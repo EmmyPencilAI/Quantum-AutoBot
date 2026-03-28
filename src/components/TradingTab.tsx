@@ -136,72 +136,74 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Strategy Selection */}
-        <div className="lg:col-span-1 space-y-4">
-          <h3 className="text-lg font-bold tracking-tight mb-4">Select Strategy</h3>
-          {strategies.map((s) => (
-            <button
-              key={s.name}
-              onClick={() => changeStrategy(s.name)}
-              disabled={isTrading || loading}
-              className={`w-full flex items-center gap-4 p-5 rounded-3xl border transition-all text-left ${
-                strategy === s.name
-                  ? "bg-white/5 border-orange-500 shadow-lg shadow-orange-500/10"
-                  : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
-              }`}
-            >
-              <div className={`w-12 h-12 ${s.bg} ${s.color} rounded-2xl flex items-center justify-center`}>
-                <s.icon size={24} />
-              </div>
-              <div className="flex-1">
-                <p className="font-bold text-lg">{s.name}</p>
-                <p className="text-xs text-white/40 leading-tight">{s.desc}</p>
-              </div>
-              {strategy === s.name && <ChevronRight className="text-orange-500" size={20} />}
-            </button>
-          ))}
+        <div className="lg:col-span-1 space-y-3 md:space-y-4">
+          <h3 className="text-base md:text-lg font-bold tracking-tight mb-2 md:mb-4">Select Strategy</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3 md:gap-4">
+            {strategies.map((s) => (
+              <button
+                key={s.name}
+                onClick={() => changeStrategy(s.name)}
+                disabled={isTrading || loading}
+                className={`flex items-center gap-3 md:gap-4 p-4 md:p-5 rounded-2xl md:rounded-3xl border transition-all text-left ${
+                  strategy === s.name
+                    ? "bg-white/5 border-orange-500 shadow-lg shadow-orange-500/10"
+                    : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
+                }`}
+              >
+                <div className={`w-10 h-10 md:w-12 md:h-12 shrink-0 ${s.bg} ${s.color} rounded-xl md:rounded-2xl flex items-center justify-center`}>
+                  <s.icon size={20} className="md:w-6 md:h-6" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-sm md:text-lg truncate">{s.name}</p>
+                  <p className="text-[10px] md:text-xs text-white/40 leading-tight line-clamp-1 md:line-clamp-2">{s.desc}</p>
+                </div>
+                {strategy === s.name && <ChevronRight className="text-orange-500 shrink-0" size={16} />}
+              </button>
+            ))}
+          </div>
 
           <button
             onClick={toggleTrading}
             disabled={loading}
-            className={`w-full py-6 rounded-3xl font-bold text-xl flex items-center justify-center gap-3 transition-all ${
+            className={`w-full py-4 md:py-6 rounded-2xl md:rounded-3xl font-bold text-lg md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all ${
               isTrading
                 ? "bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20"
-                : "bg-orange-500 text-black hover:scale-105 shadow-xl shadow-orange-500/20"
+                : "bg-orange-500 text-black hover:scale-[1.02] shadow-xl shadow-orange-500/20"
             }`}
           >
             {isTrading ? (
               <>
-                <Square size={24} fill="currentColor" />
-                <span>{loading ? "Processing..." : "Stop Trading"}</span>
+                <Square size={20} className="md:w-6 md:h-6" fill="currentColor" />
+                <span className="truncate">{loading ? "Processing..." : "Stop Trading"}</span>
               </>
             ) : (
               <>
-                <Play size={24} fill="currentColor" />
-                <span>{loading ? "Processing..." : "Start Trading"}</span>
+                <Play size={20} className="md:w-6 md:h-6" fill="currentColor" />
+                <span className="truncate">{loading ? "Processing..." : "Start Trading"}</span>
               </>
             )}
           </button>
         </div>
 
         {/* Live PnL & Activity */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-[#0a0a0a] border border-white/10 rounded-3xl p-8 relative overflow-hidden">
-            <div className="flex items-center justify-between mb-8">
+        <div className="lg:col-span-2 space-y-4 md:space-y-6">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-5 md:p-8 relative overflow-hidden">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 md:mb-8">
               <div>
-                <p className="text-white/40 text-xs font-bold uppercase tracking-widest mb-1">Live Profit/Loss</p>
-                <h3 className={`text-5xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} <span className="text-2xl opacity-60">USDT</span>
+                <p className="text-white/40 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1">Live Profit/Loss</p>
+                <h3 className={`text-3xl md:text-5xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} <span className="text-xl md:text-2xl opacity-60">USDT</span>
                 </h3>
               </div>
-              <div className="text-right">
-                <p className="text-white/40 text-xs font-bold uppercase tracking-widest mb-1">Active Strategy</p>
-                <p className="text-xl font-bold text-orange-500">{strategy}</p>
+              <div className="sm:text-right">
+                <p className="text-white/40 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Strategy</p>
+                <p className="text-lg md:text-xl font-bold text-orange-500">{strategy}</p>
               </div>
             </div>
 
-            <div className="h-64 w-full">
+            <div className="h-48 md:h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={history}>
                   <defs>
