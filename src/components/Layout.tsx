@@ -1,96 +1,125 @@
 import React from "react";
-import { Wallet, TrendingUp, Trophy, Users, Settings as SettingsIcon, BarChart3 } from "lucide-react";
-import { Tab } from "../App";
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { motion, AnimatePresence } from "motion/react";
+import { Wallet, BarChart3, TrendingUp, Trophy, Users, Settings, LogOut } from "lucide-react";
+import { auth } from "../firebase";
 
 interface LayoutProps {
+  activeTab: number;
+  setActiveTab: (tab: number) => void;
   children: React.ReactNode;
-  activeTab: Tab;
-  setActiveTab: (tab: Tab) => void;
-  account: string | null;
+  user: any;
 }
 
-export function Layout({ children, activeTab, setActiveTab, account }: LayoutProps) {
-  const navItems = [
-    { id: "wallet", icon: Wallet, label: "Wallet" },
-    { id: "markets", icon: BarChart3, label: "Markets" },
-    { id: "trading", icon: TrendingUp, label: "Trading" },
-    { id: "leaderboard", icon: Trophy, label: "Leaderboard" },
-    { id: "community", icon: Users, label: "Community" },
-    { id: "settings", icon: SettingsIcon, label: "Settings" },
+const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, user }) => {
+  const tabs = [
+    { id: 0, name: "Wallet", icon: Wallet },
+    { id: 1, name: "Markets", icon: BarChart3 },
+    { id: 2, name: "Trading", icon: TrendingUp },
+    { id: 3, name: "Leaderboard", icon: Trophy },
+    { id: 4, name: "Community", icon: Users },
+    { id: 5, name: "Settings", icon: Settings },
   ];
 
   return (
-    <div className="relative min-h-screen">
-      {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 bg-[#0a0a0a]/80 backdrop-blur-xl border-b border-white/5 px-4 h-16 flex items-center justify-between max-w-lg mx-auto">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-500/20 overflow-hidden">
-            <img 
-              src="https://drive.google.com/uc?export=view&id=16POTdSt2d2Zh_caldrCLB-vMjIwYhl3Y" 
-              alt="Logo" 
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-              onError={(e) => {
-                // Fallback if drive link fails
-                e.currentTarget.style.display = 'none';
-                e.currentTarget.parentElement?.classList.add('flex', 'items-center', 'justify-center');
-                const icon = document.createElement('div');
-                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trending-up text-black"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>';
-                e.currentTarget.parentElement?.appendChild(icon.firstChild!);
-              }}
-            />
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col md:flex-row font-sans">
+      {/* Sidebar (Desktop) */}
+      <aside className="hidden md:flex flex-col w-64 bg-[#0a0a0a] border-r border-white/10 p-6">
+        <div className="flex items-center gap-3 mb-10">
+          <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center">
+            <TrendingUp className="text-black" />
           </div>
-          <span className="font-bold text-lg tracking-tight">QUANTUM</span>
+          <h1 className="text-xl font-bold tracking-tight uppercase">Quantum</h1>
         </div>
-        
-        {account ? (
-          <div className="bg-white/5 border border-white/10 rounded-full px-3 py-1 flex items-center gap-2">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-            <span className="text-xs font-mono text-white/60">
-              {account.slice(0, 6)}...{account.slice(-4)}
-            </span>
+
+        <nav className="flex-1 space-y-2">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                activeTab === tab.id
+                  ? "bg-orange-500 text-black font-semibold"
+                  : "text-white/60 hover:bg-white/5 hover:text-white"
+              }`}
+            >
+              <tab.icon size={20} />
+              <span>{tab.name}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="mt-auto pt-6 border-t border-white/10">
+          <div className="flex items-center gap-3 mb-4">
+            <img
+              src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
+              alt="Avatar"
+              className="w-10 h-10 rounded-full bg-white/10"
+              referrerPolicy="no-referrer"
+            />
+            <div className="overflow-hidden">
+              <p className="text-sm font-medium truncate">{user?.displayName || "User"}</p>
+              <p className="text-xs text-white/40 truncate">{user?.email}</p>
+            </div>
           </div>
-        ) : (
-          <div className="text-xs text-white/40 font-medium">Not Connected</div>
-        )}
-      </header>
+          <button
+            onClick={() => auth.signOut()}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-400/10 transition-all"
+          >
+            <LogOut size={20} />
+            <span>Logout</span>
+          </button>
+        </div>
+      </aside>
 
       {/* Main Content */}
-      <main className="relative z-10">
-        {children}
-      </main>
+      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+        {/* Header (Mobile) */}
+        <header className="md:hidden flex items-center justify-between p-4 bg-[#0a0a0a] border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-orange-500 rounded flex items-center justify-center">
+              <TrendingUp size={18} className="text-black" />
+            </div>
+            <span className="font-bold uppercase tracking-wider">Quantum</span>
+          </div>
+          <button onClick={() => auth.signOut()} className="text-red-400">
+            <LogOut size={20} />
+          </button>
+        </header>
 
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#0a0a0a]/90 backdrop-blur-2xl border-t border-white/5 pb-safe max-w-lg mx-auto">
-        <div className="flex items-center justify-around h-20 px-1">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id as Tab)}
-                className={cn(
-                  "flex flex-col items-center justify-center gap-1 transition-all duration-300 relative px-2 sm:px-4 py-2 rounded-2xl min-w-[50px]",
-                  isActive ? "text-emerald-500" : "text-white/40 hover:text-white/60"
-                )}
-              >
-                {isActive && (
-                  <div className="absolute inset-0 bg-emerald-500/5 rounded-2xl -z-10" />
-                )}
-                <Icon size={18} strokeWidth={isActive ? 2.5 : 2} className="sm:w-5 sm:h-5" />
-                <span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest truncate max-w-[60px]">{item.label}</span>
-              </button>
-            );
-          })}
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-8">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+              className="max-w-6xl mx-auto"
+            >
+              {children}
+            </motion.div>
+          </AnimatePresence>
         </div>
-      </nav>
+
+        {/* Bottom Nav (Mobile) */}
+        <nav className="md:hidden flex justify-around p-3 bg-[#0a0a0a] border-t border-white/10">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex flex-col items-center gap-1 transition-all ${
+                activeTab === tab.id ? "text-orange-500" : "text-white/40"
+              }`}
+            >
+              <tab.icon size={20} />
+              <span className="text-[10px] uppercase font-bold tracking-tighter">{tab.name}</span>
+            </button>
+          ))}
+        </nav>
+      </main>
     </div>
   );
-}
+};
+
+export default Layout;

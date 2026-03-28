@@ -2,19 +2,22 @@
   "entities": {
     "User": {
       "title": "User Profile",
-      "description": "User profile data for leaderboard and community.",
+      "description": "User profile data, wallet info, and balances.",
       "type": "object",
       "properties": {
-        "walletAddress": { "type": "string", "description": "Wallet address" },
-        "username": { "type": "string", "description": "Display name" },
-        "avatar": { "type": "string", "description": "Web3 avatar URL" },
-        "totalProfit": { "type": "number", "description": "Total USDT profit" },
-        "strategy": { "type": "string", "description": "Active strategy" },
-        "region": { "type": "string", "description": "User region" },
-        "lastActive": { "type": "string", "format": "date-time", "description": "Last activity timestamp" },
-        "role": { "type": "string", "description": "User role" }
+        "uid": { "type": "string" },
+        "username": { "type": "string" },
+        "avatar": { "type": "string" },
+        "suiWallet": { "type": "string" },
+        "suiBalance": { "type": "number" },
+        "usdtBalance": { "type": "number" },
+        "totalProfit": { "type": "number" },
+        "activeStrategy": { "type": "string", "enum": ["Aggressive", "Momentum", "Scalping", "Conservative", "None"] },
+        "isTrading": { "type": "boolean" },
+        "region": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["walletAddress", "username", "totalProfit", "lastActive"]
+      "required": ["uid", "username", "suiWallet"]
     },
     "Post": {
       "title": "Community Post",
@@ -22,43 +25,64 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "authorUid": { "type": "string", "description": "Firebase UID" },
+        "authorUid": { "type": "string" },
         "authorName": { "type": "string" },
         "authorAvatar": { "type": "string" },
-        "authorWallet": { "type": "string", "description": "Wallet address" },
         "content": { "type": "string" },
-        "likes": { "type": "number" },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["authorUid", "authorName", "authorWallet", "content", "likes", "createdAt"]
+      "required": ["authorUid", "content", "createdAt"]
     },
     "Trade": {
-      "title": "Trade History",
-      "description": "History of trades for a user.",
+      "title": "Trade Transaction",
+      "description": "Record of a trading activity.",
       "type": "object",
       "properties": {
+        "id": { "type": "string" },
         "uid": { "type": "string" },
         "pair": { "type": "string" },
-        "strategy": { "type": "string" },
-        "pnl": { "type": "number", "description": "Total profit before split" },
-        "userShare": { "type": "number", "description": "User's 50% share" },
+        "type": { "type": "string", "enum": ["Buy", "Sell"] },
+        "amount": { "type": "number" },
+        "price": { "type": "number" },
+        "pnl": { "type": "number" },
         "timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "pair", "pnl", "userShare", "timestamp"]
+      "required": ["uid", "pair", "type", "amount", "price", "timestamp"]
+    },
+    "Notification": {
+      "title": "User Notification",
+      "description": "In-app notification for user events.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["Transfer", "Trade", "Community"] },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "title", "message", "createdAt"]
     }
   },
   "firestore": {
     "/users/{uid}": {
       "schema": "User",
-      "description": "User profiles"
+      "description": "User profiles and account state."
     },
     "/posts/{postId}": {
       "schema": "Post",
-      "description": "Community posts"
+      "description": "Community posts feed."
     },
     "/trades/{tradeId}": {
       "schema": "Trade",
-      "description": "Trade history"
+      "description": "Global trade history for analytics and leaderboard."
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User-specific notifications."
     }
   }
 }

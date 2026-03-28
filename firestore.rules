@@ -1,33 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    // Collection: users
-    // Document ID: {uid} (Firebase UID)
-    // Fields:
-    //   - walletAddress: string (required, immutable)
-    //   - username: string (required)
-    //   - avatar: string (optional)
-    //   - totalProfit: number (required)
-    //   - strategy: string (optional)
-    //   - region: string (optional)
-    //   - lastActive: string (required)
-    //   - role: string (optional)
-    //
-    // Collection: posts
-    // Document ID: {postId}
-    // Fields:
-    //   - authorUid: string (required, immutable, Firebase UID)
-    //   - authorName: string (required)
-    //   - authorAvatar: string (optional)
-    //   - authorWallet: string (required)
-    //   - content: string (required)
-    //   - likes: number (required)
-    //   - createdAt: string (required, immutable)
-    // ===============================================================
 
     // ===============================================================
     // Helper Functions
@@ -40,65 +13,76 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "emmanuelobed877@gmail.com" && request.auth.token.email_verified == true));
-    }
-
     function isValidUser(data) {
-      return data.keys().hasAll(['walletAddress', 'username', 'totalProfit', 'lastActive']) &&
-             data.walletAddress is string && data.walletAddress.size() > 0 &&
+      return data.keys().hasAll(['uid', 'username', 'suiWallet']) &&
+             data.uid is string && data.uid.size() > 0 &&
              data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
-             data.totalProfit is number &&
-             data.lastActive is string &&
-             (!('role' in data) || data.role in ['admin', 'user']);
+             data.suiWallet is string && data.suiWallet.size() > 0;
     }
 
     function isValidPost(data) {
-      return data.keys().hasAll(['authorUid', 'authorName', 'authorWallet', 'content', 'likes', 'createdAt']) &&
-             (data.authorUid == "system-bot" || (isAuthenticated() && data.authorUid == request.auth.uid)) &&
-             data.authorName is string && data.authorName.size() > 0 && data.authorName.size() < 100 &&
-             data.authorWallet is string &&
-             data.content is string && data.content.size() > 0 && data.content.size() < 5000 &&
-             data.likes is number &&
+      return data.keys().hasAll(['authorUid', 'content', 'createdAt']) &&
+             data.authorUid is string &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 1000 &&
              data.createdAt is string;
     }
 
     function isValidTrade(data) {
-      return data.keys().hasAll(['uid', 'pair', 'pnl', 'timestamp']) &&
-             data.uid is string && data.uid == request.auth.uid &&
+      return data.keys().hasAll(['uid', 'pair', 'type', 'amount', 'price', 'timestamp']) &&
+             data.uid is string &&
              data.pair is string &&
-             data.pnl is number &&
+             data.type in ['Buy', 'Sell'] &&
+             data.amount is number && data.amount > 0 &&
+             data.price is number && data.price > 0 &&
              data.timestamp is string;
     }
 
-    // ===============================================================
-    // Rules
-    // ===============================================================
-
-    match /users/{uid} {
-      allow read: if isAuthenticated();
-      allow create: if isOwner(uid) && isValidUser(request.resource.data) && 
-                    (!('role' in request.resource.data) || request.resource.data.role == 'user' || isAdmin());
-      allow update: if (isOwner(uid) || isAdmin()) && isValidUser(request.resource.data) && 
-                    request.resource.data.walletAddress == resource.data.walletAddress &&
-                    (request.resource.data.role == resource.data.role || isAdmin());
+    function isValidNotification(data) {
+      return data.keys().hasAll(['uid', 'title', 'message', 'createdAt']) &&
+             data.uid is string &&
+             data.title is string && data.title.size() > 0 &&
+             data.message is string && data.message.size() > 0 &&
+             data.createdAt is string;
     }
 
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // Users: Only owner can read/write their own profile.
+    match /users/{userId} {
+      allow read: if isAuthenticated(); // Allow reading other profiles for community/leaderboard
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    // Posts: Anyone can read, only authenticated can create, owner can update/delete.
     match /posts/{postId} {
       allow read: if true;
-      allow create: if true; // Temporarily allow all creates to diagnose bot issue
-      allow update: if isAuthenticated() && (
-        (request.auth.uid == resource.data.authorUid && isValidPost(request.resource.data)) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) && request.resource.data.likes == resource.data.likes + 1)
-      );
-      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorUid || isAdmin());
+      allow create: if isAuthenticated() && isValidPost(request.resource.data);
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.authorUid || request.auth.uid == 'admin');
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorUid || request.auth.uid == 'admin');
     }
 
+    // Trades: Anyone can read (for leaderboard), only system/owner can create.
     match /trades/{tradeId} {
-      allow read: if isAuthenticated() && request.auth.uid == resource.data.uid;
+      allow read: if true;
       allow create: if isAuthenticated() && isValidTrade(request.resource.data);
+      allow update: if false; // Trades are immutable records
+      allow delete: if false;
+    }
+
+    // Notifications: Only owner can read/write their own notifications.
+    match /notifications/{notificationId} {
+      allow read: if isOwner(resource.data.uid);
+      allow create: if isAuthenticated(); // System can create notifications for users
+      allow update: if isOwner(resource.data.uid);
+      allow delete: if isOwner(resource.data.uid);
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
     }
   }
 }

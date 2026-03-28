@@ -1,447 +1,155 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { ethers } from "ethers";
-import { auth, db } from "./firebase";
-import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, orderBy, limit, where } from "firebase/firestore";
-import { CONFIG, USDT_ABI, QUANTUM_ABI } from "./config";
-import { Layout } from "./components/Layout";
-import { TradingDashboard } from "./components/TradingDashboard";
-import { WalletTab } from "./components/WalletTab";
-import { Leaderboard } from "./components/Leaderboard";
-import { Community } from "./components/Community";
-import { Settings } from "./components/Settings";
-import { Markets } from "./components/Markets";
+import React, { useState, useEffect } from "react";
+import { auth, googleProvider, facebookProvider, appleProvider, db } from "./firebase";
+import { onAuthStateChanged, signInWithPopup } from "firebase/auth";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { TrendingUp, Shield, Globe, Zap, ArrowRight, Chrome, Facebook, Apple } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { AlertTriangle, X, CheckCircle2, AlertCircle, Info as InfoIcon } from "lucide-react";
+import Layout from "./components/Layout";
+import WalletTab from "./components/WalletTab";
+import MarketsTab from "./components/MarketsTab";
+import TradingTab from "./components/TradingTab";
+import LeaderboardTab from "./components/LeaderboardTab";
+import CommunityTab from "./components/CommunityTab";
+import SettingsTab from "./components/SettingsTab";
+import { deriveSuiWallet } from "./lib/sui";
 
-declare global {
-  interface Window {
-    ethereum?: any;
-    TradingView?: any;
-  }
-}
-
-export type Tab = "wallet" | "trading" | "leaderboard" | "community" | "settings" | "markets";
-
-interface Notification {
-  id: string;
-  type: "success" | "error" | "info";
-  message: string;
-}
-
-interface ModalConfig {
-  title: string;
-  message: string;
-  onConfirm?: (value?: string) => void;
-  onCancel?: () => void;
-  type: "alert" | "confirm" | "prompt";
-  placeholder?: string;
-}
-
-interface UserProfile {
-  uid: string;
-  username?: string;
-  avatar?: string;
-  totalProfit?: number;
-  lastActive?: string;
-  role?: string;
-  notifications?: boolean;
-  privacyMode?: boolean;
-  walletAddress?: string;
-}
-
-export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>("wallet");
-  const [account, setAccount] = useState<string | null>(null);
-  const [balance, setBalance] = useState<string>("0.00");
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [userProfile, setUserProfile] = useState<any>(null);
-  const [showRiskWarning, setShowRiskWarning] = useState(true);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [modal, setModal] = useState<ModalConfig | null>(null);
-  const [promptValue, setPromptValue] = useState("");
-
-  // Trading State (Lifted for persistence)
-  const [isTrading, setIsTrading] = useState(() => {
-    const saved = localStorage.getItem("isTrading");
-    return saved === "true";
-  });
-  const [tradingAmount, setTradingAmount] = useState(() => localStorage.getItem("tradingAmount") || "");
-  const [tradingPnl, setTradingPnl] = useState(() => parseFloat(localStorage.getItem("tradingPnl") || "0"));
-  const [tradingChartData, setTradingChartData] = useState<any[]>(() => {
-    const saved = localStorage.getItem("tradingChartData");
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [tradingStrategy, setTradingStrategy] = useState(() => localStorage.getItem("tradingStrategy") || CONFIG.STRATEGIES[0]);
-  const [tradingPair, setTradingPair] = useState(() => localStorage.getItem("tradingPair") || CONFIG.PAIRS[0]);
-  const [tradingHistory, setTradingHistory] = useState<any[]>(() => {
-    const saved = localStorage.getItem("tradingHistory");
-    return saved ? JSON.parse(saved) : [];
-  });
+const App: React.FC = () => {
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
-    localStorage.setItem("isTrading", isTrading.toString());
-    localStorage.setItem("tradingAmount", tradingAmount);
-    localStorage.setItem("tradingPnl", tradingPnl.toString());
-    localStorage.setItem("tradingChartData", JSON.stringify(tradingChartData));
-    localStorage.setItem("tradingStrategy", tradingStrategy);
-    localStorage.setItem("tradingPair", tradingPair);
-    localStorage.setItem("tradingHistory", JSON.stringify(tradingHistory));
-  }, [isTrading, tradingAmount, tradingPnl, tradingChartData, tradingStrategy, tradingPair, tradingHistory]);
-
-  // Real-time Trade History Sync (Firestore)
-  useEffect(() => {
-    if (isAuthReady && account && auth.currentUser) {
-      const tradesRef = collection(db, "trades");
-      const q = query(tradesRef, where("uid", "==", auth.currentUser.uid), orderBy("timestamp", "desc"), limit(50));
-      const unsub = onSnapshot(q, (snap) => {
-        const history = snap.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            time: new Date(data.timestamp).toLocaleString(),
-            type: data.pnl >= 0 ? "up" : "down",
-            amount: Math.abs(data.userShare || data.pnl).toFixed(4),
-            pair: data.pair
-          };
-        });
-        setTradingHistory(history);
-      }, (error) => {
-        console.error("Trade history sync error:", error);
-      });
-      return () => unsub();
-    }
-  }, [isAuthReady, account]);
-
-  // Live Trading Simulation (Local state only during active trade)
-  useEffect(() => {
-    let interval: any;
-    if (isTrading) {
-      interval = setInterval(() => {
-        const change = (Math.random() * 2 - 0.9) * (tradingStrategy === "Aggressive" ? 2 : 1);
-        setTradingPnl(prev => prev + change);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // Ensure user document exists in Firestore
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
         
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString();
-        
-        setTradingChartData(prev => {
-          const newData = [
-            ...prev.slice(-19),
-            { time: timeStr, value: (prev[prev.length - 1]?.value || 0) + change }
-          ];
-          return newData;
-        });
-      }, 3000);
-    }
-    return () => clearInterval(interval);
-  }, [isTrading, tradingStrategy, tradingPair]);
-
-  const notify = (message: string, type: "success" | "error" | "info" = "info") => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setNotifications(prev => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 5000);
-  };
-
-  const showAlert = (title: string, message: string) => {
-    setModal({ title, message, type: "alert" });
-  };
-
-  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
-    setModal({ title, message, type: "confirm", onConfirm });
-  };
-
-  const showPrompt = (title: string, message: string, placeholder: string, onConfirm: (value: string) => void) => {
-    setPromptValue("");
-    setModal({ title, message, type: "prompt", placeholder, onConfirm });
-  };
-
-  // Wallet Connection
-  const connectWallet = async () => {
-    if (window.ethereum) {
-      try {
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        const accounts = await provider.send("eth_requestAccounts", []);
-        setAccount(accounts[0]);
-        
-        notify("Wallet connected successfully!", "success");
-      } catch (error: any) {
-        console.error("Wallet connection failed:", error);
-        notify(error.message || "Wallet connection failed", "error");
-      }
-    } else {
-      showAlert("Wallet Not Found", "Please open this dApp inside a Web3 wallet browser (MetaMask, TokenPocket, etc.)");
-    }
-  };
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log("Auth State Changed:", user ? "User logged in" : "User logged out", user?.uid);
-      setIsAuthReady(true);
-    });
-
-    // Sign in anonymously on mount if not already logged in
-    const initAuth = async () => {
-      try {
-        if (!auth.currentUser) {
-          await signInAnonymously(auth);
+        if (!userSnap.exists()) {
+          const keypair = deriveSuiWallet(user.uid);
+          await setDoc(userRef, {
+            uid: user.uid,
+            username: user.displayName || "Quantum Trader",
+            avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+            suiWallet: keypair.toSuiAddress(),
+            suiBalance: 0,
+            usdtBalance: 1000, // Starting demo balance
+            totalProfit: 0,
+            activeStrategy: "None",
+            isTrading: false,
+            region: "Global",
+            createdAt: new Date().toISOString(),
+          });
         }
-      } catch (err) {
-        console.warn("Initial anonymous auth failed:", err);
+        setUser(user);
+      } else {
+        setUser(null);
       }
-    };
-    initAuth();
-
-    // Suppress cross-origin frame access errors in preview environment
-    const handleError = (event: ErrorEvent) => {
-      if (event.message && (
-        event.message.includes("Blocked a frame with origin") || 
-        event.message.includes("Failed to read a named property 'origin' from 'Location'")
-      )) {
-        console.warn("Cross-origin frame access blocked (expected in preview environment):", event.message);
-        event.preventDefault();
-      }
-    };
-    window.addEventListener('error', handleError);
-
-    return () => {
-      unsubscribe();
-      window.removeEventListener('error', handleError);
-    };
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
-  // Real-time User Profile Sync (Firestore)
-  useEffect(() => {
-    console.log("Profile Sync Effect:", { isAuthReady, hasUser: !!auth.currentUser, account });
-    if (isAuthReady && auth.currentUser) {
-      const profileRef = doc(db, "users", auth.currentUser.uid);
-      const unsub = onSnapshot(profileRef, async (docSnap) => {
-        console.log("Profile Snapshot:", docSnap.exists() ? "exists" : "not exists", docSnap.id);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const profile = { uid: auth.currentUser!.uid, ...data } as UserProfile;
-          setUserProfile(profile);
-          
-          // Auto-set account if walletAddress exists and not already set
-          if (data.walletAddress && !account) {
-            console.log("Auto-connecting wallet from profile:", data.walletAddress);
-            setAccount(data.walletAddress);
-          }
-          
-          // If wallet is connected but not in profile, update profile
-          if (account && data.walletAddress !== account.toLowerCase()) {
-            console.log("Updating profile with wallet address:", account);
-            await updateDoc(profileRef, { 
-              walletAddress: account.toLowerCase(),
-              // Update username if it was a guest name
-              username: data.username?.startsWith("Guest_") ? `User_${account.slice(2, 6)}` : data.username
-            });
-          }
-        } else {
-          console.log("Creating initial profile for:", account || "Guest");
-          // Create initial profile (Guest or with Wallet if connected)
-          const newProfile = {
-            walletAddress: account ? account.toLowerCase() : null,
-            username: account ? `User_${account.slice(2, 6)}` : `Guest_${auth.currentUser!.uid.slice(0, 4)}`,
-            totalProfit: 0,
-            avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${account || auth.currentUser!.uid}`,
-            lastActive: new Date().toISOString(),
-            role: "user",
-            notifications: true,
-            privacyMode: false
-          };
-          await setDoc(profileRef, newProfile);
-        }
-      }, (error) => {
-        console.error("Profile sync error:", error);
-      });
-      return () => unsub();
-    }
-  }, [isAuthReady, account]);
-
-  // Fetch Balance
-  const updateBalance = useCallback(async () => {
-    if (account) {
-      try {
-        const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
-        const usdtContract = new ethers.Contract(CONFIG.USDT_ADDRESS, USDT_ABI, provider);
-        const bal = await usdtContract.balanceOf(account);
-        setBalance(ethers.formatUnits(bal, 18));
-      } catch (error) {
-        console.error("Failed to fetch balance:", error);
-      }
-    }
-  }, [account]);
-
-  useEffect(() => {
-    updateBalance();
-    const interval = setInterval(updateBalance, 30000);
-    return () => clearInterval(interval);
-  }, [updateBalance]);
-
-  const renderTab = () => {
-    switch (activeTab) {
-      case "wallet":
-        return <WalletTab account={account} balance={balance} connectWallet={connectWallet} notify={notify} showPrompt={showPrompt} showAlert={showAlert} />;
-      case "trading":
-        return (
-          <TradingDashboard 
-            account={account} 
-            balance={balance} 
-            showAlert={showAlert} 
-            notify={notify}
-            isTrading={isTrading}
-            setIsTrading={setIsTrading}
-            pnl={tradingPnl}
-            setPnl={setTradingPnl}
-            chartData={tradingChartData}
-            setChartData={setTradingChartData}
-            amount={tradingAmount}
-            setAmount={setTradingAmount}
-            strategy={tradingStrategy}
-            setStrategy={setTradingStrategy}
-            pair={tradingPair}
-            setPair={setTradingPair}
-            history={tradingHistory}
-            updateBalance={updateBalance}
-            setActiveTab={setActiveTab}
-            userProfile={userProfile}
-          />
-        );
-      case "leaderboard":
-        return <Leaderboard />;
-      case "community":
-        return <Community userProfile={userProfile} notify={notify} />;
-      case "settings":
-        return <Settings userProfile={userProfile} showConfirm={showConfirm} notify={notify} />;
-      case "markets":
-        return <Markets />;
-      default:
-        return <WalletTab account={account} balance={balance} connectWallet={connectWallet} notify={notify} showPrompt={showPrompt} showAlert={showAlert} />;
+  const handleLogin = async (provider: any) => {
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (e) {
+      console.error("Login failed:", e);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-emerald-500/30">
-      <AnimatePresence>
-        {showRiskWarning && (
-          <motion.div 
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="fixed top-0 left-0 right-0 z-50 bg-amber-500/10 border-b border-amber-500/20 backdrop-blur-md p-3 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-3 max-w-4xl mx-auto w-full px-4">
-              <AlertTriangle className="text-amber-500 shrink-0" size={20} />
-              <p className="text-xs text-amber-200/80 leading-tight">
-                ⚠️ Crypto trading is highly risky. Profits are not guaranteed. Quantum Finance is an automated trading tool, not financial advice.
-              </p>
-              <button 
-                onClick={() => setShowRiskWarning(false)}
-                className="text-xs font-medium text-amber-500 hover:text-amber-400 transition-colors"
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-16 h-16 bg-orange-500 rounded-2xl flex items-center justify-center animate-bounce shadow-2xl shadow-orange-500/20">
+            <TrendingUp size={32} className="text-black" />
+          </div>
+          <p className="text-white/40 font-bold uppercase tracking-widest animate-pulse">Initializing Quantum...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">
+        {/* Background Accents */}
+        <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-500 rounded-full blur-[120px]" />
+          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500 rounded-full blur-[120px]" />
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-xl w-full text-center space-y-10 relative z-10"
+        >
+          <div className="flex flex-col items-center gap-6">
+            <div className="w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-orange-500/20">
+              <TrendingUp size={40} className="text-black" />
+            </div>
+            <h1 className="text-6xl font-bold tracking-tighter uppercase italic">Quantum Finance</h1>
+            <p className="text-xl text-white/60 font-medium">
+              The next generation of non-custodial trading on Sui. Powered by zkLogin.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            <button
+              onClick={() => handleLogin(googleProvider)}
+              className="w-full bg-white text-black font-bold py-5 rounded-3xl flex items-center justify-center gap-3 hover:scale-105 transition-all shadow-xl"
+            >
+              <Chrome size={24} />
+              <span>Continue with Google</span>
+            </button>
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                onClick={() => handleLogin(facebookProvider)}
+                className="bg-[#1877F2] text-white font-bold py-5 rounded-3xl flex items-center justify-center gap-3 hover:scale-105 transition-all shadow-xl"
               >
-                Dismiss
+                <Facebook size={24} />
+                <span>Facebook</span>
+              </button>
+              <button
+                onClick={() => handleLogin(appleProvider)}
+                className="bg-white text-black font-bold py-5 rounded-3xl flex items-center justify-center gap-3 hover:scale-105 transition-all shadow-xl"
+              >
+                <Apple size={24} />
+                <span>Apple</span>
               </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <Layout activeTab={activeTab} setActiveTab={setActiveTab} account={account}>
-        <div className="pt-16 pb-24 max-w-lg mx-auto px-4 min-h-screen flex flex-col">
-          {renderTab()}
-        </div>
-      </Layout>
-
-      {/* Notifications */}
-      <div className="fixed bottom-24 left-4 right-4 z-[100] pointer-events-none flex flex-col gap-2">
-        <AnimatePresence>
-          {notifications.map(n => (
-            <motion.div
-              key={n.id}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className={`pointer-events-auto p-4 rounded-2xl shadow-2xl flex items-center gap-3 border backdrop-blur-xl ${
-                n.type === "success" ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
-                n.type === "error" ? "bg-red-500/20 border-red-500/30 text-red-400" :
-                "bg-blue-500/20 border-blue-500/30 text-blue-400"
-              }`}
-            >
-              {n.type === "success" ? <CheckCircle2 size={18} /> : 
-               n.type === "error" ? <AlertCircle size={18} /> : 
-               <InfoIcon size={18} />}
-              <p className="text-sm font-medium">{n.message}</p>
-              <button onClick={() => setNotifications(prev => prev.filter(item => item.id !== n.id))} className="ml-auto opacity-50 hover:opacity-100">
-                <X size={16} />
-              </button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-
-      {/* Custom Modal */}
-      <AnimatePresence>
-        {modal && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => modal.type === "alert" && setModal(null)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-sm bg-[#1a1a1a] border border-white/10 rounded-[32px] p-8 shadow-2xl"
-            >
-              <h3 className="text-xl font-bold mb-2">{modal.title}</h3>
-              <p className="text-white/60 text-sm mb-6 leading-relaxed">{modal.message}</p>
-              
-              {modal.type === "prompt" && (
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder={modal.placeholder}
-                  value={promptValue}
-                  onChange={(e) => setPromptValue(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-lg font-bold focus:outline-none focus:border-emerald-500/50 mb-6"
-                />
-              )}
-
-              <div className="flex gap-3">
-                {modal.type !== "alert" && (
-                  <button
-                    onClick={() => {
-                      modal.onCancel?.();
-                      setModal(null);
-                    }}
-                    className="flex-1 bg-white/5 hover:bg-white/10 text-white font-bold py-4 rounded-2xl transition-all"
-                  >
-                    Cancel
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    if (modal.type === "prompt") {
-                      modal.onConfirm?.(promptValue);
-                    } else {
-                      modal.onConfirm?.();
-                    }
-                    setModal(null);
-                  }}
-                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-4 rounded-2xl transition-all shadow-lg shadow-emerald-500/20"
-                >
-                  {modal.type === "alert" ? "OK" : "Confirm"}
-                </button>
-              </div>
-            </motion.div>
           </div>
-        )}
-      </AnimatePresence>
-    </div>
+
+          <div className="grid grid-cols-3 gap-6 pt-10 border-t border-white/10">
+            <div className="flex flex-col items-center gap-2">
+              <Shield className="text-orange-500" size={24} />
+              <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">Non-Custodial</p>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <Globe className="text-blue-500" size={24} />
+              <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">Cross-Chain</p>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <Zap className="text-green-500" size={24} />
+              <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">Instant Settlement</p>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <Layout activeTab={activeTab} setActiveTab={setActiveTab} user={user}>
+      {activeTab === 0 && <WalletTab user={user} />}
+      {activeTab === 1 && <MarketsTab />}
+      {activeTab === 2 && <TradingTab />}
+      {activeTab === 3 && <LeaderboardTab />}
+      {activeTab === 4 && <CommunityTab user={user} />}
+      {activeTab === 5 && <SettingsTab user={user} />}
+    </Layout>
   );
-}
+};
+
+export default App;
