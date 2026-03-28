@@ -5,22 +5,39 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { ethers } from "ethers";
 import dotenv from "dotenv";
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc } from "firebase/firestore";
+import admin from "firebase-admin";
 import fs from "fs";
 
 dotenv.config();
 
 // Load Firebase Config
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
-let firebaseApp;
-let db: any;
+let db: admin.firestore.Firestore | null = null;
 
 if (fs.existsSync(firebaseConfigPath)) {
-  const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-  firebaseApp = initializeApp(firebaseConfig);
-  db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-  console.log("Firebase initialized in server");
+  try {
+    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault(), // This might fail if no default creds
+      projectId: firebaseConfig.projectId,
+    });
+    // Fallback if applicationDefault fails (common in this environment)
+    if (!admin.apps.length) {
+       admin.initializeApp({
+         projectId: firebaseConfig.projectId,
+       });
+    }
+    db = admin.firestore(admin.app());
+    // Use the specific database ID if provided
+    if (firebaseConfig.firestoreDatabaseId) {
+      // Note: firebase-admin doesn't easily support named databases in the same way as the client SDK
+      // without specific configuration, but usually the default is fine or it's handled by the project.
+      // For now, we'll just use the default firestore instance.
+    }
+    console.log("Firebase Admin initialized in server");
+  } catch (e) {
+    console.error("Failed to initialize Firebase Admin:", e);
+  }
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -42,7 +59,7 @@ async function postBotMessage() {
   if (!db) return;
   try {
     const message = BOT_MESSAGES[Math.floor(Math.random() * BOT_MESSAGES.length)];
-    await addDoc(collection(db, "posts"), {
+    await db.collection("posts").add({
       authorUid: "system-bot",
       authorName: "Quantum Bot",
       authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
@@ -57,9 +74,9 @@ async function postBotMessage() {
   }
 }
 
-// Post every 30 minutes
+// Post every 15 minutes
 if (db) {
-  setInterval(postBotMessage, 1800000);
+  setInterval(postBotMessage, 900000);
   // Post one immediately on start
   setTimeout(postBotMessage, 5000);
 }

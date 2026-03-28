@@ -165,15 +165,6 @@ export default function App() {
         const accounts = await provider.send("eth_requestAccounts", []);
         setAccount(accounts[0]);
         
-        // Graceful auth for community features
-        try {
-          if (!auth.currentUser) {
-            await signInAnonymously(auth);
-          }
-        } catch (authError) {
-          console.warn("Firebase anonymous auth failed, community features may be limited:", authError);
-        }
-        
         notify("Wallet connected successfully!", "success");
       } catch (error: any) {
         console.error("Wallet connection failed:", error);
@@ -189,6 +180,18 @@ export default function App() {
       console.log("Auth State Changed:", user ? "User logged in" : "User logged out", user?.uid);
       setIsAuthReady(true);
     });
+
+    // Sign in anonymously on mount if not already logged in
+    const initAuth = async () => {
+      try {
+        if (!auth.currentUser) {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.warn("Initial anonymous auth failed:", err);
+      }
+    };
+    initAuth();
 
     // Suppress cross-origin frame access errors in preview environment
     const handleError = (event: ErrorEvent) => {
@@ -210,18 +213,25 @@ export default function App() {
 
   // Real-time User Profile Sync (Firestore)
   useEffect(() => {
-    console.log("Profile Sync Effect:", { isAuthReady, account, hasUser: !!auth.currentUser });
-    if (isAuthReady && account && auth.currentUser) {
+    console.log("Profile Sync Effect:", { isAuthReady, hasUser: !!auth.currentUser });
+    if (isAuthReady && auth.currentUser) {
       const profileRef = doc(db, "users", auth.currentUser.uid);
       const unsub = onSnapshot(profileRef, (docSnap) => {
         console.log("Profile Snapshot:", docSnap.exists() ? "exists" : "not exists", docSnap.id);
         if (docSnap.exists()) {
           const data = docSnap.data();
           console.log("Profile Data:", data);
-          setUserProfile({ uid: auth.currentUser.uid, ...data } as UserProfile);
-        } else {
+          const profile = { uid: auth.currentUser!.uid, ...data } as UserProfile;
+          setUserProfile(profile);
+          
+          // Auto-set account if walletAddress exists and not already set
+          if (data.walletAddress && !account) {
+            console.log("Auto-connecting wallet from profile:", data.walletAddress);
+            setAccount(data.walletAddress);
+          }
+        } else if (account) {
           console.log("Creating new profile for:", account);
-          // Create profile if it doesn't exist
+          // Create profile if it doesn't exist but we have an account
           const newProfile = {
             walletAddress: account.toLowerCase(),
             username: `User_${account.slice(2, 6)}`,

@@ -89,6 +89,22 @@ export function Settings({ userProfile, showConfirm, notify }: SettingsProps) {
     Array.from({ length: 5 }, (_, i) => `https://api.dicebear.com/7.x/${style}/svg?seed=${style}_${i}`)
   ).slice(0, 60);
 
+  if (!userProfile) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+        <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center">
+          <User size={40} className="text-white/20" />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold">Connect Wallet</h2>
+          <p className="text-sm text-white/40 max-w-[200px] mx-auto mt-2">
+            Please connect your wallet to view and update your profile settings.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 py-4">
       <div className="flex flex-col items-center py-8">
