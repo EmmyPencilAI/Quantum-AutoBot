@@ -2,12 +2,98 @@ import React, { useState, useEffect } from "react";
 import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
+import { db, handleFirestoreError, OperationType } from "../firebase";
+import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit } from "firebase/firestore";
 
-const TradingTab: React.FC = () => {
+interface TradingTabProps {
+  user: any;
+}
+
+const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [isTrading, setIsTrading] = useState(false);
   const [strategy, setStrategy] = useState("Momentum");
   const [pnl, setPnl] = useState(0);
   const [history, setHistory] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Sync with Firestore
+  useEffect(() => {
+    if (!user) return;
+    const userRef = doc(db, "users", user.uid);
+    const unsubscribeUser = onSnapshot(userRef, (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        setIsTrading(data.isTrading || false);
+        setStrategy(data.activeStrategy || "Momentum");
+        setPnl(data.totalProfit || 0);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+    });
+
+    // Fetch trade history for chart
+    const tradesRef = collection(db, "trades");
+    const q = query(
+      tradesRef,
+      where("uid", "==", user.uid),
+      orderBy("timestamp", "desc"),
+      limit(20)
+    );
+
+    const unsubscribeTrades = onSnapshot(q, (snapshot) => {
+      const trades = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        time: new Date(doc.data().timestamp).toLocaleTimeString(),
+        value: doc.data().pnl
+      })).reverse();
+      
+      // If we have trades, use them for the chart. 
+      // Otherwise, create some dummy data based on current PnL
+      if (trades.length > 0) {
+        setHistory(trades);
+      } else {
+        setHistory([{ time: "Start", value: 0 }]);
+      }
+    }, (error) => {
+      // Don't throw for history fetch errors, just log
+      console.error("Error fetching trade history:", error);
+    });
+
+    return () => {
+      unsubscribeUser();
+      unsubscribeTrades();
+    };
+  }, [user]);
+
+  const toggleTrading = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        isTrading: !isTrading,
+        activeStrategy: strategy
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const changeStrategy = async (newStrategy: string) => {
+    if (!user || isTrading) return;
+    setStrategy(newStrategy);
+    try {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        activeStrategy: newStrategy
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  };
 
   const strategies = [
     { name: "Aggressive", icon: Zap, color: "text-red-400", bg: "bg-red-400/10", desc: "High risk, high reward. Focuses on volatility." },
@@ -57,8 +143,8 @@ const TradingTab: React.FC = () => {
           {strategies.map((s) => (
             <button
               key={s.name}
-              onClick={() => !isTrading && setStrategy(s.name)}
-              disabled={isTrading}
+              onClick={() => changeStrategy(s.name)}
+              disabled={isTrading || loading}
               className={`w-full flex items-center gap-4 p-5 rounded-3xl border transition-all text-left ${
                 strategy === s.name
                   ? "bg-white/5 border-orange-500 shadow-lg shadow-orange-500/10"
@@ -77,7 +163,8 @@ const TradingTab: React.FC = () => {
           ))}
 
           <button
-            onClick={() => setIsTrading(!isTrading)}
+            onClick={toggleTrading}
+            disabled={loading}
             className={`w-full py-6 rounded-3xl font-bold text-xl flex items-center justify-center gap-3 transition-all ${
               isTrading
                 ? "bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20"
@@ -87,12 +174,12 @@ const TradingTab: React.FC = () => {
             {isTrading ? (
               <>
                 <Square size={24} fill="currentColor" />
-                <span>Stop Trading</span>
+                <span>{loading ? "Processing..." : "Stop Trading"}</span>
               </>
             ) : (
               <>
                 <Play size={24} fill="currentColor" />
-                <span>Start Trading</span>
+                <span>{loading ? "Processing..." : "Start Trading"}</span>
               </>
             )}
           </button>
@@ -157,26 +244,28 @@ const TradingTab: React.FC = () => {
             </div>
             <div className="space-y-4 max-h-64 overflow-y-auto pr-2 scrollbar-hide">
               <AnimatePresence>
-                {isTrading ? (
-                  [1, 2, 3, 4].map((i) => (
+                {history.length > 0 && history[0].time !== "Start" ? (
+                  history.slice().reverse().map((trade) => (
                     <motion.div
-                      key={i}
+                      key={trade.id}
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5"
                     >
                       <div className="flex items-center gap-4">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${i % 2 === 0 ? "bg-green-400/10 text-green-400" : "bg-red-400/10 text-red-400"}`}>
-                          {i % 2 === 0 ? "BUY" : "SELL"}
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${trade.type === "Buy" ? "bg-green-400/10 text-green-400" : "bg-red-400/10 text-red-400"}`}>
+                          {trade.type === "Buy" ? "BUY" : "SELL"}
                         </div>
                         <div>
-                          <p className="font-bold">BTC/USDT</p>
-                          <p className="text-xs text-white/40">Price: $64,231.50</p>
+                          <p className="font-bold">{trade.pair}</p>
+                          <p className="text-xs text-white/40">Price: ${trade.price.toLocaleString()}</p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-bold">0.025 BTC</p>
-                        <p className="text-xs text-white/40">Just now</p>
+                        <p className={`font-bold ${trade.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {trade.pnl >= 0 ? "+" : ""}{trade.pnl.toFixed(4)} USDT
+                        </p>
+                        <p className="text-xs text-white/40">{trade.time}</p>
                       </div>
                     </motion.div>
                   ))

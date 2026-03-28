@@ -105,6 +105,72 @@ if (clientDb) {
   setTimeout(postBotMessage, 5000);
 }
 
+// Background Trading Engine
+async function processBackgroundTrades() {
+  if (!db) return;
+  
+  try {
+    const usersRef = db.collection("users");
+    const tradingUsers = await usersRef.where("isTrading", "==", true).get();
+    
+    if (tradingUsers.empty) return;
+    
+    console.log(`Processing background trades for ${tradingUsers.size} users...`);
+    
+    const batch = db.batch();
+    const now = new Date().toISOString();
+    
+    for (const userDoc of tradingUsers.docs) {
+      const userData = userDoc.data();
+      const strategy = userData.activeStrategy || "Momentum";
+      
+      // Simulate a small profit/loss per minute
+      let profitFactor = 0.0001; // Base 0.01% per minute
+      switch (strategy) {
+        case "Aggressive": profitFactor = 0.0005; break;
+        case "Momentum": profitFactor = 0.0002; break;
+        case "Scalping": profitFactor = 0.0001; break;
+        case "Conservative": profitFactor = 0.00005; break;
+      }
+      
+      // Randomize slightly
+      const actualProfit = (userData.usdtBalance || 1000) * profitFactor * (Math.random() * 2 - 0.8);
+      const newBalance = (userData.usdtBalance || 0) + actualProfit;
+      const newTotalProfit = (userData.totalProfit || 0) + actualProfit;
+      
+      batch.update(userDoc.ref, {
+        usdtBalance: newBalance,
+        totalProfit: newTotalProfit,
+        lastTradeAt: now
+      });
+      
+      // Occasionally create a trade record
+      if (Math.random() < 0.2) {
+        const tradeRef = db.collection("trades").doc();
+        batch.set(tradeRef, {
+          uid: userData.uid,
+          pair: "BTC/USDT",
+          type: actualProfit >= 0 ? "Buy" : "Sell",
+          amount: Math.abs(actualProfit) * 10,
+          price: 65000 + (Math.random() * 1000 - 500),
+          pnl: actualProfit,
+          timestamp: now
+        });
+      }
+    }
+    
+    await batch.commit();
+    console.log("Background trades processed successfully");
+  } catch (error) {
+    console.error("Error in background trading loop:", error);
+  }
+}
+
+// Run background trading every minute
+if (db) {
+  setInterval(processBackgroundTrades, 60000);
+}
+
 // Sui Config (Mirroring src/lib/sui.ts)
 const SUI_RPC_URL = "https://fullnode.testnet.sui.io:443";
 // Example USDT Type on Sui Testnet

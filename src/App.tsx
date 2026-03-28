@@ -19,40 +19,54 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const path = `users/${user.uid}`;
-        try {
-          // Ensure user document exists in Firestore
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          
-          if (!userSnap.exists()) {
-            const keypair = deriveSuiWallet(user.uid);
-            await setDoc(userRef, {
-              uid: user.uid,
-              username: user.displayName || "Quantum Trader",
-              avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-              suiWallet: keypair.toSuiAddress(),
-              suiBalance: 0,
-              usdtBalance: 1000, // Starting demo balance
-              totalProfit: 0,
-              activeStrategy: "None",
-              isTrading: false,
-              region: "Global",
-              createdAt: new Date().toISOString(),
-            });
-          }
-          setUser(user);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, path);
-        }
-      } else {
-        setUser(null);
-      }
+    // Safety timeout to ensure loading screen doesn't stay forever
+    const timeout = setTimeout(() => {
       setLoading(false);
+    }, 10000); // 10 seconds max loading
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      try {
+        if (user) {
+          const path = `users/${user.uid}`;
+          try {
+            // Ensure user document exists in Firestore
+            const userRef = doc(db, "users", user.uid);
+            const userSnap = await getDoc(userRef);
+            
+            if (!userSnap.exists()) {
+              const keypair = deriveSuiWallet(user.uid);
+              await setDoc(userRef, {
+                uid: user.uid,
+                username: user.displayName || "Quantum Trader",
+                avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+                suiWallet: keypair.toSuiAddress(),
+                suiBalance: 0,
+                usdtBalance: 1000, // Starting demo balance
+                totalProfit: 0,
+                activeStrategy: "None",
+                isTrading: false,
+                region: "Global",
+                createdAt: new Date().toISOString(),
+              });
+            }
+            setUser(user);
+          } catch (error) {
+            handleFirestoreError(error, OperationType.WRITE, path);
+          }
+        } else {
+          setUser(null);
+        }
+      } catch (e) {
+        console.error("Auth state change error:", e);
+      } finally {
+        setLoading(false);
+        clearTimeout(timeout);
+      }
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const handleLogin = async (provider: any) => {
@@ -162,7 +176,7 @@ const App: React.FC = () => {
     <Layout activeTab={activeTab} setActiveTab={setActiveTab} user={user}>
       {activeTab === 0 && <WalletTab user={user} />}
       {activeTab === 1 && <MarketsTab />}
-      {activeTab === 2 && <TradingTab />}
+      {activeTab === 2 && <TradingTab user={user} />}
       {activeTab === 3 && <LeaderboardTab />}
       {activeTab === 4 && <CommunityTab user={user} />}
       {activeTab === 5 && <SettingsTab user={user} />}
