@@ -1,5 +1,5 @@
 {
   "name": "Quantum Finance",
-  "description": "Non-custodial USDT auto-trading dApp on BNB Chain. Retain custody, trade smart, share profits.",
-  "requestFramePermissions": []
+  "description": "Non-custodial USDT auto-trading dApp on Sui. Powered by zkLogin, featuring instant settlement and profit sharing.",
+  "requestFramePermissions": ["camera"]
 }

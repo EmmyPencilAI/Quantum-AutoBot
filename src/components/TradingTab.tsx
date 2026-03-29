@@ -14,8 +14,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [strategy, setStrategy] = useState("Momentum");
   const [selectedPair, setSelectedPair] = useState("BTC / USDT");
   const [pnl, setPnl] = useState(0);
+  const [initialInvestment, setInitialInvestment] = useState(0);
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fundAmount, setFundAmount] = useState("100");
 
   // Sync with Firestore
   useEffect(() => {
@@ -28,6 +30,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setStrategy(data.activeStrategy || "Momentum");
         setSelectedPair(data.activePair || "BTC / USDT");
         setPnl(data.totalProfit || 0);
+        setInitialInvestment(data.initialInvestment || 0);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -39,7 +42,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       tradesRef,
       where("uid", "==", user.uid),
       orderBy("timestamp", "desc"),
-      limit(20)
+      limit(100)
     );
 
     const unsubscribeTrades = onSnapshot(q, (snapshot) => {
@@ -73,11 +76,55 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     setLoading(true);
     try {
       const userRef = doc(db, "users", user.uid);
+      
+      if (isTrading) {
+        // Settlement logic
+        const response = await fetch("/api/trading/settle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uid: user.uid })
+        });
+        const result = await response.json();
+        if (result.success) {
+          console.log("Settlement successful:", result);
+        } else {
+          throw new Error(result.error || "Settlement failed");
+        }
+      } else {
+        // Start trading
+        if (initialInvestment <= 0) {
+          alert("Please fund your trading account first.");
+          setLoading(false);
+          return;
+        }
+        await updateDoc(userRef, {
+          isTrading: true,
+          activeStrategy: strategy,
+          activePair: selectedPair
+        });
+      }
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fundTrading = async () => {
+    if (!user || isTrading) return;
+    const amount = parseFloat(fundAmount);
+    if (isNaN(amount) || amount <= 0) return;
+
+    setLoading(true);
+    try {
+      const userRef = doc(db, "users", user.uid);
+      // In a real app, we would verify the user has enough balance in their wallet
+      // and perform an on-chain transfer to the trading contract.
       await updateDoc(userRef, {
-        isTrading: !isTrading,
-        activeStrategy: strategy,
-        activePair: selectedPair
+        usdtBalance: (initialInvestment || 0) + amount,
+        initialInvestment: (initialInvestment || 0) + amount
       });
+      setFundAmount("100");
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
     } finally {
@@ -160,6 +207,29 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Pair & Strategy Selection */}
         <div className="lg:col-span-1 space-y-4 md:space-y-6">
+          {/* Fund Trading */}
+          <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Fund Trading Account</h3>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                value={fundAmount}
+                onChange={(e) => setFundAmount(e.target.value)}
+                disabled={isTrading || loading}
+                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-orange-500/50"
+                placeholder="Amount (USDT)"
+              />
+              <button
+                onClick={fundTrading}
+                disabled={isTrading || loading}
+                className="bg-orange-500 text-black px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50"
+              >
+                Deposit
+              </button>
+            </div>
+            <p className="text-[10px] text-white/40">Current Trading Balance: <span className="text-white font-bold">{initialInvestment.toFixed(2)} USDT</span></p>
+          </div>
+
           {/* Pair Selection */}
           <div className="space-y-3 md:space-y-4">
             <h3 className="text-sm md:text-lg font-bold tracking-tight mb-1 md:mb-4">Select Trading Pair</h3>

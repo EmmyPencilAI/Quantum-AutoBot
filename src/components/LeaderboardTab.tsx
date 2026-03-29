@@ -1,120 +1,158 @@
-import React from "react";
-import { Trophy, Medal, Star, TrendingUp, Globe, Target } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Trophy, TrendingUp, User, Activity, Medal, Star } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 
-const LeaderboardTab: React.FC = () => {
-  const topUsers = [
-    { rank: 1, name: "CryptoWhale", profit: "1,245,678.50", strategy: "Aggressive", region: "USA", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=CryptoWhale" },
-    { rank: 2, name: "SuiMaster", profit: "982,341.20", strategy: "Momentum", region: "Japan", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=SuiMaster" },
-    { rank: 3, name: "QuantumTrader", profit: "845,123.45", strategy: "Scalping", region: "Germany", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=QuantumTrader" },
-    { rank: 4, name: "MoonShot", profit: "756,234.12", strategy: "Aggressive", region: "Brazil", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=MoonShot" },
-    { rank: 5, name: "SteadyHand", profit: "645,123.00", strategy: "Conservative", region: "UK", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=SteadyHand" },
-    { rank: 6, name: "AlphaSeeker", profit: "543,210.99", strategy: "Momentum", region: "Canada", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=AlphaSeeker" },
-    { rank: 7, name: "DeFiKing", profit: "432,109.88", strategy: "Scalping", region: "Singapore", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=DeFiKing" },
-    { rank: 8, name: "SuiNinja", profit: "321,098.77", strategy: "Conservative", region: "Australia", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=SuiNinja" },
-  ];
+interface LeaderboardTabProps {
+  user: any;
+}
+
+const LeaderboardTab: React.FC<LeaderboardTabProps> = ({ user }) => {
+  const [traders, setTraders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      try {
+        const response = await fetch("/api/leaderboard");
+        const data = await response.json();
+        setTraders(data);
+      } catch (error) {
+        console.error("Error fetching leaderboard:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLeaderboard();
+    const interval = setInterval(fetchLeaderboard, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
 
   return (
-    <div className="space-y-4 md:space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Global Leaderboard</h2>
-        <div className="flex items-center gap-2 text-white/40 bg-white/5 px-3 md:px-4 py-2 rounded-xl md:rounded-2xl border border-white/10 shrink-0">
-          <Globe size={14} className="md:w-4 md:h-4" />
-          <span className="text-[10px] md:text-xs font-bold uppercase tracking-widest">Top 100 Traders</span>
+    <div className="space-y-4 md:space-y-6 pb-20 md:pb-0">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-4">
+        <h2 className="text-2xl md:text-3xl font-bold tracking-tight flex items-center gap-3">
+          <Trophy className="text-orange-500 w-6 h-6 md:w-8 md:h-8" />
+          Global Leaderboard
+        </h2>
+        <div className="flex items-center gap-2 md:gap-3">
+          <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-green-500 animate-pulse" />
+          <span className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-white/40">
+            Live Rankings
+          </span>
         </div>
       </div>
 
-      {/* Top 3 Podium */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-6 md:mb-10">
-        {[topUsers[1], topUsers[0], topUsers[2]].map((user, i) => (
-          <div
-            key={user.rank}
-            className={`bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-6 md:p-8 flex flex-col items-center text-center relative overflow-hidden group ${
-              user.rank === 1 ? "lg:-mt-6 border-orange-500/50 shadow-2xl shadow-orange-500/10" : ""
-            }`}
-          >
-            {user.rank === 1 && (
-              <div className="absolute top-0 left-0 w-full h-1 bg-orange-500" />
-            )}
-            <div className="relative mb-4 md:mb-6">
-              <img
-                src={user.avatar}
-                alt={user.name}
-                className={`w-20 h-20 md:w-24 md:h-24 rounded-full border-4 ${
-                  user.rank === 1 ? "border-orange-500" : "border-white/10"
-                } bg-white/5 group-hover:scale-110 transition-transform`}
-                referrerPolicy="no-referrer"
-              />
-              <div className={`absolute -bottom-2 -right-2 w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center text-black font-bold border-4 border-[#0a0a0a] text-sm md:text-base ${
-                user.rank === 1 ? "bg-orange-500" : user.rank === 2 ? "bg-slate-300" : "bg-orange-300"
-              }`}>
-                {user.rank}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
+        {/* Top 3 Cards */}
+        <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {traders.slice(0, 3).map((trader, index) => (
+            <motion.div
+              key={trader.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 }}
+              className={`relative bg-[#0a0a0a] border ${
+                index === 0 ? "border-orange-500/50 shadow-orange-500/10" : "border-white/10"
+              } rounded-2xl md:rounded-3xl p-6 md:p-8 overflow-hidden group shadow-2xl`}
+            >
+              <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
+                {index === 0 ? <Medal size={120} className="text-orange-500" /> : <Star size={120} className="text-white" />}
               </div>
-            </div>
-            <h3 className="text-lg md:text-xl font-bold mb-1 truncate max-w-full">{user.name}</h3>
-            <p className="text-white/40 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-4 flex items-center gap-1">
-              <Globe size={12} />
-              {user.region}
-            </p>
-            <div className="w-full bg-white/5 rounded-xl md:rounded-2xl p-3 md:p-4 space-y-2">
-              <div className="flex justify-between text-[10px] md:text-xs">
-                <span className="text-white/40">Total Profit</span>
-                <span className="font-bold text-green-400">+${user.profit}</span>
-              </div>
-              <div className="flex justify-between text-[10px] md:text-xs">
-                <span className="text-white/40">Strategy</span>
-                <span className="font-bold text-orange-500">{user.strategy}</span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+              
+              <div className="relative z-10 flex flex-col items-center text-center space-y-4">
+                <div className="relative">
+                  <img
+                    src={trader.avatar}
+                    alt={trader.name}
+                    className={`w-20 h-20 md:w-24 md:h-24 rounded-full border-4 ${
+                      index === 0 ? "border-orange-500" : "border-white/10"
+                    } bg-white/5`}
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className={`absolute -top-2 -right-2 w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                    index === 0 ? "bg-orange-500 text-black" : "bg-white/10 text-white"
+                  }`}>
+                    {index + 1}
+                  </div>
+                </div>
+                
+                <div>
+                  <h3 className="text-lg md:text-xl font-bold truncate max-w-[150px]">{trader.name}</h3>
+                  <p className="text-white/40 text-[10px] md:text-xs font-bold uppercase tracking-widest">Top Trader</p>
+                </div>
 
-      {/* Leaderboard Table */}
-      <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl">
-        <div className="overflow-x-auto scrollbar-hide">
-          <table className="w-full text-left min-w-[600px] md:min-w-full">
-            <thead>
-              <tr className="border-b border-white/10 bg-white/5">
-                <th className="px-4 md:px-8 py-4 md:py-5 text-[10px] md:text-xs font-bold uppercase tracking-widest text-white/40">Rank</th>
-                <th className="px-4 md:px-8 py-4 md:py-5 text-[10px] md:text-xs font-bold uppercase tracking-widest text-white/40">Trader</th>
-                <th className="px-4 md:px-8 py-4 md:py-5 text-[10px] md:text-xs font-bold uppercase tracking-widest text-white/40">Strategy</th>
-                <th className="px-4 md:px-8 py-4 md:py-5 text-[10px] md:text-xs font-bold uppercase tracking-widest text-white/40">Region</th>
-                <th className="px-4 md:px-8 py-4 md:py-5 text-[10px] md:text-xs font-bold uppercase tracking-widest text-white/40 text-right">Total Profit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topUsers.slice(3).map((user) => (
-                <tr key={user.rank} className="border-b border-white/5 hover:bg-white/5 transition-colors group">
-                  <td className="px-4 md:px-8 py-4 md:py-5">
-                    <span className="font-mono text-white/40 text-xs md:text-sm">#{user.rank}</span>
-                  </td>
-                  <td className="px-4 md:px-8 py-4 md:py-5">
-                    <div className="flex items-center gap-2 md:gap-3">
-                      <img
-                        src={user.avatar}
-                        alt={user.name}
-                        className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/5 shrink-0"
-                        referrerPolicy="no-referrer"
-                      />
-                      <span className="font-bold text-sm md:text-base group-hover:text-orange-500 transition-colors truncate max-w-[120px] md:max-w-none">{user.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 md:px-8 py-4 md:py-5">
-                    <div className="flex items-center gap-2 text-[10px] md:text-xs font-bold text-orange-500">
-                      <Target size={14} className="shrink-0" />
-                      <span className="truncate">{user.strategy}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 md:px-8 py-4 md:py-5">
-                    <span className="text-[10px] md:text-xs text-white/40 uppercase font-bold tracking-widest truncate">{user.region}</span>
-                  </td>
-                  <td className="px-4 md:px-8 py-4 md:py-5 text-right">
-                    <span className="font-bold text-green-400 text-sm md:text-base">+${user.profit}</span>
-                  </td>
+                <div className="space-y-1">
+                  <p className="text-2xl md:text-3xl font-bold text-green-400 tracking-tighter">
+                    +{trader.profit.toLocaleString()} <span className="text-xs opacity-60">USDT</span>
+                  </p>
+                  <div className="flex items-center justify-center gap-2 text-[10px] md:text-xs text-white/40">
+                    <Activity size={12} className="text-orange-500" />
+                    <span>{trader.isTrading ? "Currently Trading" : "Idle"}</span>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Rankings Table */}
+        <div className="lg:col-span-3 bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl">
+          <div className="p-4 md:p-6 border-bottom border-white/5 bg-white/5 flex items-center justify-between">
+            <h3 className="font-bold text-sm md:text-lg">Full Rankings</h3>
+            <span className="text-[10px] md:text-xs text-white/40 uppercase font-bold tracking-widest">Top 10 Performers</span>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-white/5 text-[10px] md:text-xs text-white/40 uppercase font-bold tracking-widest">
+                  <th className="px-4 md:px-8 py-4">Rank</th>
+                  <th className="px-4 md:px-8 py-4">Trader</th>
+                  <th className="px-4 md:px-8 py-4">Status</th>
+                  <th className="px-4 md:px-8 py-4 text-right">Total Profit</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {traders.map((trader, index) => (
+                  <tr key={trader.id} className="hover:bg-white/5 transition-colors group">
+                    <td className="px-4 md:px-8 py-4 md:py-6">
+                      <span className={`font-bold text-sm md:text-lg ${index < 3 ? "text-orange-500" : "text-white/40"}`}>
+                        #{index + 1}
+                      </span>
+                    </td>
+                    <td className="px-4 md:px-8 py-4 md:py-6">
+                      <div className="flex items-center gap-3 md:gap-4">
+                        <img
+                          src={trader.avatar}
+                          alt={trader.name}
+                          className="w-8 h-8 md:w-12 md:h-12 rounded-full border border-white/10 bg-white/5"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div>
+                          <p className="font-bold text-xs md:text-base">{trader.name}</p>
+                          <p className="text-[9px] md:text-xs text-white/40 font-mono">{trader.id.slice(0, 8)}...</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 md:px-8 py-4 md:py-6">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-1.5 h-1.5 md:w-2 md:h-2 rounded-full ${trader.isTrading ? "bg-green-500 animate-pulse" : "bg-white/10"}`} />
+                        <span className="text-[10px] md:text-xs font-medium text-white/60">
+                          {trader.isTrading ? "Active" : "Offline"}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 md:px-8 py-4 md:py-6 text-right">
+                      <p className="font-bold text-green-400 text-xs md:text-lg">
+                        +{trader.profit.toLocaleString()} <span className="text-[10px] opacity-60">USDT</span>
+                      </p>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

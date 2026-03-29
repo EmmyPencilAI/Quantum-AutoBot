@@ -3,7 +3,6 @@ import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import { ethers } from "ethers";
 import dotenv from "dotenv";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
@@ -21,16 +20,16 @@ if (fs.existsSync(firebaseConfigPath)) {
     
     if (!admin.apps.length) {
       try {
-        // Try default initialization first - this is often best in managed environments
-        admin.initializeApp();
-        console.log("Firebase Admin initialized with default environment config");
+        // Prioritize explicit projectId from config to avoid connecting to the wrong project
+        admin.initializeApp({
+          projectId: firebaseConfig.projectId,
+        });
+        console.log(`Firebase Admin initialized with explicit projectId: ${firebaseConfig.projectId}`);
       } catch (e) {
-        console.warn("Default Firebase Admin initialization failed, trying with explicit projectId:", e);
+        console.warn("Explicit Firebase Admin initialization failed, trying default:", e);
         try {
-          admin.initializeApp({
-            projectId: firebaseConfig.projectId,
-          });
-          console.log(`Firebase Admin initialized with explicit projectId: ${firebaseConfig.projectId}`);
+          admin.initializeApp();
+          console.log("Firebase Admin initialized with default environment config");
         } catch (e2) {
           console.error("Critical: Firebase Admin initialization failed completely:", e2);
         }
@@ -86,13 +85,24 @@ const BOT_MESSAGES = [
   "Did you know? Our Quantum engine uses advanced AI to optimize trade entries.",
 ];
 
+const WHALE_ALERTS = [
+  "🚨 WHALE ALERT: 500,000 USDT moved from unknown wallet to Quantum Treasury!",
+  "🚨 WHALE ALERT: 300,000 USDT position opened on ETH/USDT using Aggressive Strategy!",
+  "🚨 WHALE ALERT: 100,000 USDT profit settled by top trader on SOL/USDT!",
+  "🚨 WHALE ALERT: 250,000 USDT liquidity added to SUI/USDT pool!",
+];
+
 async function postBotMessage() {
   if (!db) {
     console.warn("Bot skipped post: Firestore Admin not initialized");
     return;
   }
   try {
-    const message = BOT_MESSAGES[Math.floor(Math.random() * BOT_MESSAGES.length)];
+    const isWhale = Math.random() < 0.3;
+    const message = isWhale 
+      ? WHALE_ALERTS[Math.floor(Math.random() * WHALE_ALERTS.length)]
+      : BOT_MESSAGES[Math.floor(Math.random() * BOT_MESSAGES.length)];
+    
     const postData = {
       authorUid: "system-bot",
       authorName: "Quantum Bot",
@@ -200,6 +210,57 @@ async function startServer() {
   app.use(express.json());
 
   // Trading Engine Simulation & Settlement
+  app.post("/api/trading/settle", async (req, res) => {
+    const { uid, walletAddress } = req.body;
+    if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
+
+    try {
+      const userRef = db.collection("users").doc(uid);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const userData = userDoc.data();
+      const currentBalance = userData.usdtBalance || 0;
+      const initialInvestment = userData.initialInvestment || 0;
+      const profit = currentBalance - initialInvestment;
+
+      // Calculate shares
+      const userProfitShare = profit > 0 ? profit * 0.5 : profit;
+      const treasuryShare = profit > 0 ? profit * 0.5 : 0;
+      const totalToUser = initialInvestment + userProfitShare;
+
+      console.log(`Settling for ${uid}: Current=${currentBalance}, Initial=${initialInvestment}, Profit=${profit}, ToUser=${totalToUser}, ToTreasury=${treasuryShare}`);
+
+      // Update Firestore
+      await userRef.update({
+        isTrading: false,
+        usdtBalance: 0,
+        initialInvestment: 0,
+        lastSettlement: {
+          amount: totalToUser,
+          profit: userProfitShare,
+          treasury: treasuryShare,
+          timestamp: new Date().toISOString()
+        }
+      });
+
+      // Simulate on-chain transfer
+      let txHash = "0x" + Math.random().toString(16).slice(2);
+      
+      res.json({
+        success: true,
+        totalToUser,
+        userProfitShare,
+        treasuryShare,
+        txHash,
+        message: "Settlement successful. Funds returned to wallet."
+      });
+    } catch (error: any) {
+      console.error("Settlement error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/trading/simulate", async (req, res) => {
     const { strategy, principal, duration, account } = req.body;
     
@@ -279,6 +340,29 @@ async function startServer() {
       error,
       timestamp: new Date().toISOString()
     });
+  });
+
+  // Leaderboard Endpoint
+  app.get("/api/leaderboard", async (req, res) => {
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    try {
+      const topTraders = await db.collection("users")
+        .orderBy("totalProfit", "desc")
+        .limit(10)
+        .get();
+      
+      const traders = topTraders.docs.map((doc: any) => ({
+        id: doc.id,
+        name: doc.data().displayName || "Anonymous",
+        avatar: doc.data().photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${doc.id}`,
+        profit: doc.data().totalProfit || 0,
+        isTrading: doc.data().isTrading || false
+      }));
+      
+      res.json(traders);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Firebase Admin Status Endpoint
