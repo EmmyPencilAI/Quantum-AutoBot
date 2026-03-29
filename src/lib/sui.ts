@@ -1,16 +1,17 @@
-import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
+import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { generateNonce, generateRandomness } from "@mysten/zklogin";
-import axios from "axios";
 
 // Connect to Sui Devnet or Testnet
-export const suiClient = new SuiJsonRpcClient({ 
-  url: getJsonRpcFullnodeUrl("testnet"),
-  network: "testnet"
+export const suiClient = new SuiClient({ 
+  url: getFullnodeUrl("testnet")
 });
 
 export const SUI_CONTRACT_ADDRESS = import.meta.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
 export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS || "0xe7768fa3f1907ddfd5bda7d7760e637b9d5a4887fa3f94482bc20a11e37db472";
+
+// USDT on Sui Testnet (Example ID)
+export const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad::coin::COIN";
 
 /**
  * Simplified zkLogin wallet derivation for the AI Studio environment.
@@ -33,8 +34,6 @@ export async function getSuiBalance(address: string) {
 }
 
 export async function getUsdtBalance(address: string) {
-  // USDT on Sui Testnet (Example ID, would be real on Mainnet)
-  const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad::coin::COIN";
   try {
     const balance = await suiClient.getBalance({ owner: address, coinType: USDT_TYPE });
     return Number(balance.totalBalance) / 1e6; // USDT usually has 6 decimals
@@ -42,6 +41,49 @@ export async function getUsdtBalance(address: string) {
     console.error("Error fetching USDT balance:", e);
     return 0;
   }
+}
+
+/**
+ * Real on-chain transfer for USDT or SUI
+ */
+export async function transferOnChain(params: {
+  signer: Ed25519Keypair;
+  to: string;
+  amount: number;
+  coinType?: string;
+}) {
+  const { signer, to, amount, coinType } = params;
+  const txb = new Transaction();
+
+  if (!coinType || coinType.includes("sui::SUI")) {
+    // SUI Transfer
+    const [coin] = txb.splitCoins(txb.gas, [Math.floor(amount * 1e9)]);
+    txb.transferObjects([coin], to);
+  } else {
+    // Token Transfer (e.g. USDT)
+    // We need to find the user's coins for this type
+    const coins = await suiClient.getCoins({
+      owner: signer.toSuiAddress(),
+      coinType: coinType,
+    });
+
+    if (coins.data.length === 0) throw new Error("No coins found for this type");
+
+    const [primaryCoin, ...rest] = coins.data.map((c) => c.coinObjectId);
+    if (rest.length > 0) {
+      txb.mergeCoins(primaryCoin, rest);
+    }
+
+    const [coin] = txb.splitCoins(primaryCoin, [Math.floor(amount * 1e6)]);
+    txb.transferObjects([coin], to);
+  }
+
+  const result = await suiClient.signAndExecuteTransaction({
+    signer,
+    transaction: txb,
+  });
+
+  return result;
 }
 
 // Settlement logic: Shares profit between user and treasury

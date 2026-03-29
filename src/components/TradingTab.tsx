@@ -245,10 +245,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               </button>
             </div>
             <p className="text-[10px] text-white/40">
-              Wallet Balance: <span className="text-white font-bold">{walletBalance.toFixed(2)} USDT</span>
+              Wallet Balance: <span className="text-blue-400 font-bold">{walletBalance.toFixed(2)} USDT</span>
             </p>
             <p className="text-[10px] text-white/40">
-              Trading Balance: <span className="text-white font-bold">{initialInvestment.toFixed(2)} USDT</span>
+              Trading Balance: <span className="text-green-400 font-bold">{initialInvestment.toFixed(2)} USDT</span>
             </p>
           </div>
 

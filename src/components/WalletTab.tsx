@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp } from "lucide-react";
 import { motion } from "motion/react";
-import { deriveSuiWallet, getSuiBalance, getUsdtBalance, crossChainTransfer } from "../lib/sui";
+import { deriveSuiWallet, getSuiBalance, getUsdtBalance, crossChainTransfer, transferOnChain, USDT_TYPE, SUI_TREASURY_ADDRESS } from "../lib/sui";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 
@@ -20,6 +20,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     chain: "Sui",
   });
   const [sending, setSending] = useState(false);
+  const [toppingUp, setToppingUp] = useState(false);
 
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -77,6 +78,45 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       console.error("Transfer failed:", e);
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleTopUp = async () => {
+    if (balances.usdt <= 0) {
+      alert("No USDT found on-chain to top up.");
+      return;
+    }
+    
+    setToppingUp(true);
+    try {
+      const keypair = deriveSuiWallet(user.uid);
+      const amount = balances.usdt;
+      
+      console.log(`Topping up ${amount} USDT from on-chain...`);
+      
+      // 1. Transfer USDT on-chain to Treasury
+      const result = await transferOnChain({
+        signer: keypair,
+        to: SUI_TREASURY_ADDRESS,
+        amount: amount,
+        coinType: USDT_TYPE
+      });
+      
+      console.log("On-chain transfer successful:", result.digest);
+      
+      // 2. Update Firestore wallet balance
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        walletBalance: balances.wallet + amount
+      });
+      
+      alert(`Successfully topped up ${amount.toFixed(2)} USDT!`);
+      refreshBalances(address);
+    } catch (e: any) {
+      console.error("Top up failed:", e);
+      alert("Top up failed: " + (e.message || "Unknown error"));
+    } finally {
+      setToppingUp(false);
     }
   };
 
@@ -155,9 +195,13 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           <div className="mt-2 text-[8px] md:text-[10px] text-white/20 font-mono">
             On-chain: {balances.usdt.toFixed(2)} USDT
           </div>
-          <button className="mt-3 md:mt-4 w-full bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold py-2 md:py-3 rounded-lg md:rounded-2xl hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2 text-[10px] md:text-base">
+          <button 
+            onClick={handleTopUp}
+            disabled={toppingUp || balances.usdt <= 0}
+            className="mt-3 md:mt-4 w-full bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold py-2 md:py-3 rounded-lg md:rounded-2xl hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2 text-[10px] md:text-base disabled:opacity-50"
+          >
             <Plus size={14} className="md:w-4.5 md:h-4.5" />
-            <span>Top Up from On-chain</span>
+            <span>{toppingUp ? "Processing..." : "Top Up from On-chain"}</span>
           </button>
         </div>
       </div>
