@@ -52,11 +52,11 @@ const MarketsTab: React.FC = () => {
   }, []);
 
   const marketData = [
-    { symbol: "BTC", name: "Bitcoin", price: "64,231.50", change: "+2.45%", up: true },
-    { symbol: "ETH", name: "Ethereum", price: "3,452.12", change: "-1.12%", up: false },
-    { symbol: "SOL", name: "Solana", price: "145.67", change: "+5.67%", up: true },
-    { symbol: "SUI", name: "Sui", price: "1.89", change: "+12.34%", up: true },
-    { symbol: "BNB", name: "BNB", price: "589.45", change: "-0.45%", up: false },
+    { symbol: "BTC", name: "Bitcoin", price: "64,231.50", change: "+2.45%", up: true, logo: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
+    { symbol: "ETH", name: "Ethereum", price: "3,452.12", change: "-1.12%", up: false, logo: "https://assets.coingecko.com/coins/images/279/large/ethereum.png" },
+    { symbol: "SOL", name: "Solana", price: "145.67", change: "+5.67%", up: true, logo: "https://assets.coingecko.com/coins/images/4128/large/solana.png" },
+    { symbol: "SUI", name: "Sui", price: "1.89", change: "+12.34%", up: true, logo: "https://assets.coingecko.com/coins/images/26375/large/sui_logo.png" },
+    { symbol: "BNB", name: "BNB", price: "589.45", change: "-0.45%", up: false, logo: "https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png" },
   ];
 
   return (
@@ -87,8 +87,8 @@ const MarketsTab: React.FC = () => {
           >
             <div className="flex items-center justify-between mb-3 md:mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 md:w-10 md:h-10 bg-white/5 rounded-lg md:rounded-xl flex items-center justify-center font-bold text-orange-500 text-xs md:text-base">
-                  {asset.symbol[0]}
+                <div className="w-8 h-8 md:w-10 md:h-10 bg-white/5 rounded-lg md:rounded-xl flex items-center justify-center overflow-hidden">
+                  <img src={asset.logo} alt={asset.name} className="w-6 h-6 md:w-8 md:h-8 object-contain" referrerPolicy="no-referrer" />
                 </div>
                 <div className="min-w-0">
                   <p className="font-bold text-xs md:text-base truncate">{asset.name}</p>

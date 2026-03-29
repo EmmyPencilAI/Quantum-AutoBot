@@ -18,6 +18,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [fundAmount, setFundAmount] = useState("100");
+  const [walletBalance, setWalletBalance] = useState(0);
 
   // Sync with Firestore
   useEffect(() => {
@@ -31,6 +32,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setSelectedPair(data.activePair || "BTC / USDT");
         setPnl(data.totalProfit || 0);
         setInitialInvestment(data.initialInvestment || 0);
+        setWalletBalance(data.walletBalance || 0);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -115,12 +117,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     const amount = parseFloat(fundAmount);
     if (isNaN(amount) || amount <= 0) return;
 
+    if (amount > walletBalance) {
+      alert("Insufficient wallet balance. Please receive funds first.");
+      return;
+    }
+
     setLoading(true);
     try {
       const userRef = doc(db, "users", user.uid);
-      // In a real app, we would verify the user has enough balance in their wallet
-      // and perform an on-chain transfer to the trading contract.
+      // Deduct from wallet balance and add to trading balance
       await updateDoc(userRef, {
+        walletBalance: walletBalance - amount,
         usdtBalance: (initialInvestment || 0) + amount,
         initialInvestment: (initialInvestment || 0) + amount
       });
@@ -159,8 +166,16 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   };
 
   const tradingPairs = [
-    "BTC / USDT", "ETH / USDT", "BNB / USDT", "SOL / USDT", "SUI / USDT",
-    "XRP / USDT", "ADA / USDT", "DOGE / USDT", "AVAX / USDT", "MATIC / USDT"
+    { symbol: "BTC / USDT", logo: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
+    { symbol: "ETH / USDT", logo: "https://assets.coingecko.com/coins/images/279/large/ethereum.png" },
+    { symbol: "BNB / USDT", logo: "https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png" },
+    { symbol: "SOL / USDT", logo: "https://assets.coingecko.com/coins/images/4128/large/solana.png" },
+    { symbol: "SUI / USDT", logo: "https://assets.coingecko.com/coins/images/26375/large/sui_logo.png" },
+    { symbol: "XRP / USDT", logo: "https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png" },
+    { symbol: "ADA / USDT", logo: "https://assets.coingecko.com/coins/images/975/large/cardano.png" },
+    { symbol: "DOGE / USDT", logo: "https://assets.coingecko.com/coins/images/5/large/dogecoin.png" },
+    { symbol: "AVAX / USDT", logo: "https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite_Trans.png" },
+    { symbol: "MATIC / USDT", logo: "https://assets.coingecko.com/coins/images/4713/large/matic-token-icon_2x.png" }
   ];
 
   const strategies = [
@@ -183,6 +198,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     }
     return () => clearInterval(interval);
   }, [isTrading, pnl]);
+
+  const activePairData = tradingPairs.find(p => p.symbol === selectedPair) || tradingPairs[0];
 
   return (
     <div className="space-y-4 md:space-y-6 pb-20 md:pb-0">
@@ -227,7 +244,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                 Deposit
               </button>
             </div>
-            <p className="text-[10px] text-white/40">Current Trading Balance: <span className="text-white font-bold">{initialInvestment.toFixed(2)} USDT</span></p>
+            <p className="text-[10px] text-white/40">
+              Wallet Balance: <span className="text-white font-bold">{walletBalance.toFixed(2)} USDT</span>
+            </p>
+            <p className="text-[10px] text-white/40">
+              Trading Balance: <span className="text-white font-bold">{initialInvestment.toFixed(2)} USDT</span>
+            </p>
           </div>
 
           {/* Pair Selection */}
@@ -236,16 +258,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             <div className="grid grid-cols-2 gap-2">
               {tradingPairs.map((pair) => (
                 <button
-                  key={pair}
-                  onClick={() => changePair(pair)}
+                  key={pair.symbol}
+                  onClick={() => changePair(pair.symbol)}
                   disabled={isTrading || loading}
-                  className={`py-2.5 md:py-3 px-3 md:px-4 rounded-xl md:rounded-2xl border text-[10px] md:text-sm font-bold transition-all ${
-                    selectedPair === pair
+                  className={`py-2.5 md:py-3 px-3 md:px-4 rounded-xl md:rounded-2xl border text-[10px] md:text-sm font-bold transition-all flex items-center gap-2 ${
+                    selectedPair === pair.symbol
                       ? "bg-orange-500 text-black border-orange-500 shadow-lg shadow-orange-500/20"
                       : "bg-[#0a0a0a] border-white/10 text-white/60 hover:border-white/20"
                   }`}
                 >
-                  {pair}
+                  <img src={pair.logo} alt={pair.symbol} className="w-4 h-4 md:w-5 md:h-5 object-contain" referrerPolicy="no-referrer" />
+                  <span className="truncate">{pair.symbol}</span>
                 </button>
               ))}
             </div>
@@ -315,7 +338,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               <div className="sm:text-right flex flex-col sm:items-end gap-2">
                 <div>
                   <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Pair</p>
-                  <p className="text-base md:text-xl font-bold text-white">{selectedPair}</p>
+                  <div className="flex items-center gap-2 sm:justify-end">
+                    <img src={activePairData.logo} alt={selectedPair} className="w-5 h-5 md:w-6 md:h-6 object-contain" referrerPolicy="no-referrer" />
+                    <p className="text-base md:text-xl font-bold text-white">{selectedPair}</p>
+                  </div>
                 </div>
                 <div>
                   <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Strategy</p>
@@ -368,7 +394,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             <div className="space-y-3 md:space-y-4 max-h-48 md:max-h-64 overflow-y-auto pr-2 scrollbar-hide">
               <AnimatePresence>
                 {history.length > 0 && history[0].time !== "Start" ? (
-                  history.slice().reverse().map((trade) => (
+                  history.slice().reverse().map((trade: any) => (
                     <motion.div
                       key={trade.id}
                       initial={{ opacity: 0, x: -10 }}
@@ -381,7 +407,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                         </div>
                         <div className="min-w-0">
                           <p className="font-bold text-xs md:text-base truncate">{trade.pair}</p>
-                          <p className="text-[9px] md:text-xs text-white/40 truncate">Price: ${trade.price.toLocaleString()}</p>
+                          <p className="text-[9px] md:text-xs text-white/40 truncate">
+                            {trade.amount?.toFixed(2) || "0.00"} USDT • {trade.duration || 0}s
+                          </p>
                         </div>
                       </div>
                       <div className="text-right shrink-0">

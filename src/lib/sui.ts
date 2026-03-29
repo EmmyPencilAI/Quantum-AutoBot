@@ -9,8 +9,8 @@ export const suiClient = new SuiJsonRpcClient({
   network: "testnet"
 });
 
-export const SUI_CONTRACT_ADDRESS = import.meta.env.VITE_SUI_CONTRACT_ADDRESS || "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad";
-export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS || "0x7e16f20935055b45c2ad5d4b302306649423527773c6827317e943975d607a09";
+export const SUI_CONTRACT_ADDRESS = import.meta.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
+export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS || "0xe7768fa3f1907ddfd5bda7d7760e637b9d5a4887fa3f94482bc20a11e37db472";
 
 /**
  * Simplified zkLogin wallet derivation for the AI Studio environment.

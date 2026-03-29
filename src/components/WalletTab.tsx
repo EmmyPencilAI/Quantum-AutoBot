@@ -11,7 +11,7 @@ interface WalletTabProps {
 
 const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const [address, setAddress] = useState<string>("");
-  const [balances, setBalances] = useState({ sui: 0, usdt: 0 });
+  const [balances, setBalances] = useState({ sui: 0, usdt: 0, wallet: 0 });
   const [loading, setLoading] = useState(true);
   const [showSendModal, setShowSendModal] = useState(false);
   const [sendParams, setSendParams] = useState({
@@ -20,6 +20,9 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     chain: "Sui",
   });
   const [sending, setSending] = useState(false);
+
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const chains = ["Sui", "BNB Chain", "Tron", "Solana"];
 
@@ -34,15 +37,27 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
 
   const refreshBalances = async (addr: string) => {
     setLoading(true);
-    const sui = await getSuiBalance(addr);
-    const usdt = await getUsdtBalance(addr);
-    setBalances({ sui, usdt });
-    setLoading(false);
+    try {
+      const sui = await getSuiBalance(addr);
+      const usdt = await getUsdtBalance(addr);
+      
+      // Fetch Firestore wallet balance
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      const wallet = userSnap.exists() ? (userSnap.data().walletBalance || 0) : 0;
+      
+      setBalances({ sui, usdt, wallet });
+    } catch (e) {
+      console.error("Error refreshing balances:", e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(address);
-    // Add toast notification here if needed
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleSend = async () => {
@@ -87,8 +102,9 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
             <span className="text-[9px] md:text-xs font-mono bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10 truncate max-w-[150px] md:max-w-[200px]">
               {address.slice(0, 6)}...{address.slice(-6)}
             </span>
-            <button onClick={handleCopy} className="hover:text-orange-500 transition-colors shrink-0 p-1">
-              <Copy size={12} className="md:w-3.5 md:h-3.5" />
+            <button onClick={handleCopy} className="hover:text-orange-500 transition-colors shrink-0 p-1 relative">
+              {copied ? <ShieldCheck size={12} className="text-green-500" /> : <Copy size={12} className="md:w-3.5 md:h-3.5" />}
+              {copied && <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-green-500 text-black text-[8px] px-2 py-1 rounded font-bold">COPIED</span>}
             </button>
           </div>
         </div>
@@ -100,7 +116,10 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
             <Send size={16} className="md:w-4.5 md:h-4.5" />
             <span>Send</span>
           </button>
-          <button className="flex-1 md:flex-none bg-white/5 border border-white/10 text-white font-bold px-3 md:px-6 py-2.5 md:py-3 rounded-lg md:rounded-2xl flex items-center justify-center gap-2 hover:bg-white/10 transition-all text-xs md:text-base">
+          <button 
+            onClick={() => setShowReceiveModal(true)}
+            className="flex-1 md:flex-none bg-white/5 border border-white/10 text-white font-bold px-3 md:px-6 py-2.5 md:py-3 rounded-lg md:rounded-2xl flex items-center justify-center gap-2 hover:bg-white/10 transition-all text-xs md:text-base"
+          >
             <ArrowDownLeft size={16} className="md:w-4.5 md:h-4.5" />
             <span>Receive</span>
           </button>
@@ -128,14 +147,17 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
             <TrendingUp size={60} className="text-blue-500 md:w-[120px] md:h-[120px]" />
           </div>
-          <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">USDT Balance (Trading)</p>
+          <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">Wallet Balance (USDT)</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-5xl font-bold tracking-tighter">{balances.usdt.toFixed(2)}</h3>
+            <h3 className="text-2xl md:text-5xl font-bold tracking-tighter">{balances.wallet.toFixed(2)}</h3>
             <span className="text-blue-500 font-bold mb-0.5 md:mb-2 text-[10px] md:text-base">USDT</span>
           </div>
-          <button className="mt-3 md:mt-6 w-full bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold py-2 md:py-3 rounded-lg md:rounded-2xl hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2 text-[10px] md:text-base">
+          <div className="mt-2 text-[8px] md:text-[10px] text-white/20 font-mono">
+            On-chain: {balances.usdt.toFixed(2)} USDT
+          </div>
+          <button className="mt-3 md:mt-4 w-full bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold py-2 md:py-3 rounded-lg md:rounded-2xl hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2 text-[10px] md:text-base">
             <Plus size={14} className="md:w-4.5 md:h-4.5" />
-            <span>Fund Trading</span>
+            <span>Top Up from On-chain</span>
           </button>
         </div>
       </div>
@@ -245,6 +267,49 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
                   {sending ? "Sending..." : "Confirm"}
                 </button>
               </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Receive Modal */}
+      {showReceiveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-4 bg-black/90 backdrop-blur-md">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-5 md:p-8 w-full max-w-md shadow-2xl text-center"
+          >
+            <div className="w-16 h-16 md:w-20 md:h-20 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6">
+              <ArrowDownLeft size={32} className="text-orange-500 md:w-10 md:h-10" />
+            </div>
+            <h3 className="text-xl md:text-2xl font-bold mb-2">Receive Assets</h3>
+            <p className="text-white/40 text-xs md:text-sm mb-6 md:mb-8">Share your Sui address to receive USDT or SUI</p>
+            
+            <div className="bg-white/5 border border-white/10 rounded-xl md:rounded-2xl p-4 md:p-6 mb-6 md:mb-8 break-all font-mono text-[10px] md:text-sm relative group">
+              {address}
+              <button 
+                onClick={handleCopy}
+                className="absolute top-2 right-2 p-2 bg-black/40 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:text-orange-500"
+              >
+                <Copy size={14} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={handleCopy}
+                className="w-full bg-orange-500 text-black py-3 md:py-4 rounded-lg md:rounded-2xl font-bold text-xs md:text-base hover:scale-[1.02] transition-all flex items-center justify-center gap-2"
+              >
+                {copied ? <ShieldCheck size={18} /> : <Copy size={18} />}
+                <span>{copied ? "Address Copied!" : "Copy Full Address"}</span>
+              </button>
+              <button
+                onClick={() => setShowReceiveModal(false)}
+                className="w-full bg-white/5 border border-white/10 py-3 md:py-4 rounded-lg md:rounded-2xl font-bold text-xs md:text-base hover:bg-white/10 transition-all"
+              >
+                Close
+              </button>
             </div>
           </motion.div>
         </div>

@@ -55,7 +55,8 @@ const App: React.FC = () => {
                 avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
                 suiWallet: keypair.toSuiAddress(),
                 suiBalance: 0,
-                usdtBalance: 1000, // Starting demo balance
+                walletBalance: 5000, // Starting wallet balance
+                usdtBalance: 0, // Starting trading balance (must be funded)
                 totalProfit: 0,
                 activeStrategy: "None",
                 isTrading: false,
