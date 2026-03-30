@@ -18,7 +18,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [initialInvestment, setInitialInvestment] = useState(0);
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fundAmount, setFundAmount] = useState("100");
+  const [fundAmount, setFundAmount] = useState("0");
   const [walletBalance, setWalletBalance] = useState(0);
   const [tradingAsset, setTradingAsset] = useState("USDT");
 
@@ -122,54 +122,83 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
     setLoading(true);
     try {
-      const address = deriveSuiWallet(user.uid).toSuiAddress();
-      const balances = await getAllBalances(address);
-      const currentOnChainBalance = tradingAsset === "USDC" ? balances.usdc : balances.usdt;
-      const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+      // Check if we are funding from internal wallet or on-chain
+      // For simplicity, we'll check internal wallet first, then on-chain if needed
+      // Or we can add a toggle. Let's add a toggle or just check internal first.
+      
+      if (amount <= walletBalance) {
+        // 1. Fund from internal wallet (Firestore only)
+        console.log(`Funding ${amount} from internal wallet...`);
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, {
+          isTrading: true,
+          initialInvestment: amount,
+          walletBalance: walletBalance - amount,
+          tradingAsset: tradingAsset,
+          activeStrategy: strategy,
+          activePair: selectedPair,
+          totalProfit: 0
+        });
 
-      if (amount > currentOnChainBalance) {
-        alert(`Insufficient on-chain ${tradingAsset} balance. Please receive funds first.`);
-        setLoading(false);
-        return;
+        // Add notification
+        await setDoc(doc(collection(db, "notifications")), {
+          uid: user.uid,
+          type: "TRADE_STARTED",
+          title: "Trading Funded from Wallet",
+          message: `Successfully funded ${amount.toFixed(2)} ${tradingAsset} from your internal trading wallet. Trading started.`,
+          timestamp: new Date().toISOString(),
+          read: false
+        });
+      } else {
+        // 2. Fund from on-chain (requires transfer to treasury)
+        const address = deriveSuiWallet(user.uid).toSuiAddress();
+        const balances = await getAllBalances(address);
+        const currentOnChainBalance = tradingAsset === "USDC" ? balances.usdc : balances.usdt;
+        const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+
+        if (amount > currentOnChainBalance) {
+          alert(`Insufficient balance. You have ${walletBalance.toFixed(2)} in internal wallet and ${currentOnChainBalance.toFixed(2)} on-chain.`);
+          setLoading(false);
+          return;
+        }
+
+        if (balances.sui < 0.01) {
+          alert("Insufficient SUI for gas. Please receive some SUI first.");
+          setLoading(false);
+          return;
+        }
+
+        console.log(`Funding ${amount} from on-chain...`);
+        const keypair = deriveSuiWallet(user.uid);
+        await transferOnChain({
+          signer: keypair,
+          to: SUI_TREASURY_ADDRESS,
+          amount: amount,
+          coinType: coinType
+        });
+
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, {
+          isTrading: true,
+          initialInvestment: amount,
+          tradingAsset: tradingAsset,
+          activeStrategy: strategy,
+          activePair: selectedPair,
+          totalProfit: 0
+        });
+
+        // Add notification
+        await setDoc(doc(collection(db, "notifications")), {
+          uid: user.uid,
+          type: "TRADE_STARTED",
+          title: "Trading Funded On-chain",
+          message: `Successfully funded ${amount.toFixed(2)} ${tradingAsset} from your on-chain wallet. Trading started.`,
+          timestamp: new Date().toISOString(),
+          read: false
+        });
       }
 
-      if (balances.sui < 0.01) {
-        alert("Insufficient SUI for gas. Please receive some SUI first.");
-        setLoading(false);
-        return;
-      }
-
-      // 1. Perform on-chain transfer to Treasury
-      const keypair = deriveSuiWallet(user.uid);
-      await transferOnChain({
-        signer: keypair,
-        to: SUI_TREASURY_ADDRESS,
-        amount: amount,
-        coinType: coinType
-      });
-
-      // 2. Update Firestore
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        isTrading: true,
-        initialInvestment: amount,
-        tradingAsset: tradingAsset,
-        activeStrategy: strategy,
-        activePair: selectedPair,
-        totalProfit: 0 // Reset profit for new session
-      });
-
-      // Add notification
-      await setDoc(doc(collection(db, "notifications")), {
-        uid: user.uid,
-        type: "TRADE_STARTED",
-        title: "Trading Funded On-chain",
-        message: `Successfully funded ${amount.toFixed(2)} ${tradingAsset} from your on-chain wallet. Trading started.`,
-        timestamp: new Date().toISOString(),
-        read: false
-      });
-
-      setFundAmount("100");
+      setFundAmount("0");
     } catch (e: any) {
       console.error("Funding failed:", e);
       alert("Funding failed: " + (e.message || "Unknown error"));

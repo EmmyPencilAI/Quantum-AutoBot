@@ -1,10 +1,11 @@
-import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
-import { TransactionBlock } from "@mysten/sui/transactions";
+import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 // Connect to Sui Devnet or Testnet
 export const suiClient = new SuiClient({ 
-  url: getFullnodeUrl("testnet")
+  url: getFullnodeUrl("testnet"),
+  network: "testnet"
 });
 
 export const SUI_CONTRACT_ADDRESS = import.meta.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
@@ -74,7 +75,7 @@ export async function transferOnChain(params: {
   coinType?: string;
 }) {
   const { signer, to, amount, coinType } = params;
-  const txb = new TransactionBlock();
+  const txb = new Transaction();
 
   if (!coinType || coinType.includes("sui::SUI")) {
     // SUI Transfer
@@ -99,9 +100,9 @@ export async function transferOnChain(params: {
     txb.transferObjects([coin], to);
   }
 
-  const result = await suiClient.signAndExecuteTransactionBlock({
+  const result = await suiClient.signAndExecuteTransaction({
     signer,
-    transactionBlock: txb,
+    transaction: txb,
   });
 
   return result;
