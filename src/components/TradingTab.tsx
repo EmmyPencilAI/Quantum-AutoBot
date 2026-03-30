@@ -3,7 +3,8 @@ import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, T
 import { motion, AnimatePresence } from "motion/react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
-import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
+import { deriveSuiWallet, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
 
 interface TradingTabProps {
   user: any;
@@ -19,6 +20,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [loading, setLoading] = useState(false);
   const [fundAmount, setFundAmount] = useState("100");
   const [walletBalance, setWalletBalance] = useState(0);
+  const [tradingAsset, setTradingAsset] = useState("USDT");
 
   // Sync with Firestore
   useEffect(() => {
@@ -33,6 +35,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setPnl(data.totalProfit || 0);
         setInitialInvestment(data.initialInvestment || 0);
         setWalletBalance(data.walletBalance || 0);
+        setTradingAsset(data.tradingAsset || "USDT");
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -117,23 +120,59 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     const amount = parseFloat(fundAmount);
     if (isNaN(amount) || amount <= 0) return;
 
-    if (amount > walletBalance) {
-      alert("Insufficient wallet balance. Please receive funds first.");
-      return;
-    }
-
     setLoading(true);
     try {
-      const userRef = doc(db, "users", user.uid);
-      // Deduct from wallet balance and add to trading balance
-      await updateDoc(userRef, {
-        walletBalance: walletBalance - amount,
-        usdtBalance: (initialInvestment || 0) + amount,
-        initialInvestment: (initialInvestment || 0) + amount
+      const address = deriveSuiWallet(user.uid).toSuiAddress();
+      const balances = await getAllBalances(address);
+      const currentOnChainBalance = tradingAsset === "USDC" ? balances.usdc : balances.usdt;
+      const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+
+      if (amount > currentOnChainBalance) {
+        alert(`Insufficient on-chain ${tradingAsset} balance. Please receive funds first.`);
+        setLoading(false);
+        return;
+      }
+
+      if (balances.sui < 0.01) {
+        alert("Insufficient SUI for gas. Please receive some SUI first.");
+        setLoading(false);
+        return;
+      }
+
+      // 1. Perform on-chain transfer to Treasury
+      const keypair = deriveSuiWallet(user.uid);
+      await transferOnChain({
+        signer: keypair,
+        to: SUI_TREASURY_ADDRESS,
+        amount: amount,
+        coinType: coinType
       });
+
+      // 2. Update Firestore
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        isTrading: true,
+        initialInvestment: amount,
+        tradingAsset: tradingAsset,
+        activeStrategy: strategy,
+        activePair: selectedPair,
+        totalProfit: 0 // Reset profit for new session
+      });
+
+      // Add notification
+      await setDoc(doc(collection(db, "notifications")), {
+        uid: user.uid,
+        type: "TRADE_STARTED",
+        title: "Trading Funded On-chain",
+        message: `Successfully funded ${amount.toFixed(2)} ${tradingAsset} from your on-chain wallet. Trading started.`,
+        timestamp: new Date().toISOString(),
+        read: false
+      });
+
       setFundAmount("100");
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    } catch (e: any) {
+      console.error("Funding failed:", e);
+      alert("Funding failed: " + (e.message || "Unknown error"));
     } finally {
       setLoading(false);
     }
@@ -224,33 +263,51 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Pair & Strategy Selection */}
         <div className="lg:col-span-1 space-y-4 md:space-y-6">
-          {/* Fund Trading */}
-          <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Fund Trading Account</h3>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={fundAmount}
-                onChange={(e) => setFundAmount(e.target.value)}
-                disabled={isTrading || loading}
-                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-orange-500/50"
-                placeholder="Amount (USDT)"
-              />
+        {/* Fund Trading */}
+        <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Fund Trading Account</h3>
+          
+          <div className="flex gap-2 mb-2">
+            {["USDT", "USDC"].map((asset) => (
               <button
-                onClick={fundTrading}
+                key={asset}
+                onClick={() => setTradingAsset(asset)}
                 disabled={isTrading || loading}
-                className="bg-orange-500 text-black px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50"
+                className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                  tradingAsset === asset
+                    ? "bg-orange-500 border-orange-500 text-black"
+                    : "bg-white/5 border-white/10 text-white/40"
+                }`}
               >
-                Deposit
+                {asset}
               </button>
-            </div>
-            <p className="text-[10px] text-white/40">
-              Wallet Balance: <span className="text-blue-400 font-bold">{walletBalance.toFixed(2)} USDT</span>
-            </p>
-            <p className="text-[10px] text-white/40">
-              Trading Balance: <span className="text-green-400 font-bold">{initialInvestment.toFixed(2)} USDT</span>
-            </p>
+            ))}
           </div>
+
+          <div className="flex gap-2">
+            <input
+              type="number"
+              value={fundAmount}
+              onChange={(e) => setFundAmount(e.target.value)}
+              disabled={isTrading || loading}
+              className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-orange-500/50"
+              placeholder={`Amount (${tradingAsset})`}
+            />
+            <button
+              onClick={fundTrading}
+              disabled={isTrading || loading}
+              className="bg-orange-500 text-black px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50 whitespace-nowrap"
+            >
+              {loading ? "Processing..." : "Fund & Start"}
+            </button>
+          </div>
+          <p className="text-[10px] text-white/40">
+            Wallet Balance: <span className="text-blue-400 font-bold">{walletBalance.toFixed(2)} USD</span>
+          </p>
+          <p className="text-[10px] text-white/40">
+            Trading Balance: <span className="text-green-400 font-bold">{initialInvestment.toFixed(2)} {tradingAsset}</span>
+          </p>
+        </div>
 
           {/* Pair Selection */}
           <div className="space-y-3 md:space-y-4">
@@ -302,27 +359,16 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             </div>
           </div>
 
-          <button
-            onClick={toggleTrading}
-            disabled={loading}
-            className={`w-full py-4 md:py-6 rounded-xl md:rounded-3xl font-bold text-base md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all ${
-              isTrading
-                ? "bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20"
-                : "bg-orange-500 text-black hover:scale-[1.02] shadow-xl shadow-orange-500/20"
-            }`}
-          >
-            {isTrading ? (
-              <>
-                <Square size={18} className="md:w-6 md:h-6" fill="currentColor" />
-                <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Stop Trading"}</span>
-              </>
-            ) : (
-              <>
-                <Play size={18} className="md:w-6 md:h-6" fill="currentColor" />
-                <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Start Trading"}</span>
-              </>
-            )}
-          </button>
+          {isTrading && (
+            <button
+              onClick={toggleTrading}
+              disabled={loading}
+              className="w-full py-4 md:py-6 rounded-xl md:rounded-3xl font-bold text-base md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 shadow-xl shadow-red-500/5"
+            >
+              <Square size={18} className="md:w-6 md:h-6" fill="currentColor" />
+              <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Stop Trading & Settle"}</span>
+            </button>
+          )}
         </div>
 
         {/* Live PnL & Activity */}

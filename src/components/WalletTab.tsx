@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp } from "lucide-react";
+import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap } from "lucide-react";
 import { motion } from "motion/react";
-import { deriveSuiWallet, getSuiBalance, getUsdtBalance, crossChainTransfer, transferOnChain, USDT_TYPE, SUI_TREASURY_ADDRESS } from "../lib/sui";
+import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS } from "../lib/sui";
 import { db } from "../firebase";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
+import { Bell, CheckCircle2, Info, AlertCircle } from "lucide-react";
 
 interface WalletTabProps {
   user: any;
@@ -11,8 +12,9 @@ interface WalletTabProps {
 
 const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const [address, setAddress] = useState<string>("");
-  const [balances, setBalances] = useState({ sui: 0, usdt: 0, wallet: 0 });
+  const [balances, setBalances] = useState({ sui: 0, usdt: 0, usdc: 0, wallet: 0 });
   const [loading, setLoading] = useState(true);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [showSendModal, setShowSendModal] = useState(false);
   const [sendParams, setSendParams] = useState({
     recipient: "",
@@ -33,21 +35,32 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       const addr = keypair.toSuiAddress();
       setAddress(addr);
       refreshBalances(addr);
+
+      // Listen for notifications
+      const q = query(
+        collection(db, "notifications"),
+        where("uid", "==", user.uid),
+        orderBy("timestamp", "desc"),
+        limit(10)
+      );
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+      return () => unsubscribe();
     }
   }, [user]);
 
   const refreshBalances = async (addr: string) => {
     setLoading(true);
     try {
-      const sui = await getSuiBalance(addr);
-      const usdt = await getUsdtBalance(addr);
+      const { sui, usdt, usdc } = await getAllBalances(addr);
       
       // Fetch Firestore wallet balance
       const userRef = doc(db, "users", user.uid);
       const userSnap = await getDoc(userRef);
       const wallet = userSnap.exists() ? (userSnap.data().walletBalance || 0) : 0;
       
-      setBalances({ sui, usdt, wallet });
+      setBalances({ sui, usdt, usdc, wallet });
     } catch (e) {
       console.error("Error refreshing balances:", e);
     } finally {
@@ -72,6 +85,19 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         destinationChain: sendParams.chain,
       });
       console.log("Transfer successful:", result);
+      
+      // Add notification
+      await setDoc(doc(collection(db, "notifications")), {
+        uid: user.uid,
+        type: "TRANSFER_SENT",
+        title: "Transfer Sent",
+        message: `Successfully sent ${sendParams.amount} USDT to ${sendParams.recipient.slice(0, 6)}... on ${sendParams.chain}.`,
+        amount: parseFloat(sendParams.amount),
+        asset: "USDT",
+        timestamp: new Date().toISOString(),
+        read: false
+      });
+
       setShowSendModal(false);
       refreshBalances(address);
     } catch (e) {
@@ -82,35 +108,59 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   };
 
   const handleTopUp = async () => {
-    if (balances.usdt <= 0) {
-      alert("No USDT found on-chain to top up.");
+    if (balances.usdt <= 0 && balances.usdc <= 0) {
+      alert("No USDT or USDC found on-chain to top up.");
       return;
     }
     
     setToppingUp(true);
     try {
       const keypair = deriveSuiWallet(user.uid);
-      const amount = balances.usdt;
       
-      console.log(`Topping up ${amount} USDT from on-chain...`);
+      // Top up both if available
+      const usdtAmount = balances.usdt;
+      const usdcAmount = balances.usdc;
+      const totalAmount = usdtAmount + usdcAmount;
       
-      // 1. Transfer USDT on-chain to Treasury
-      const result = await transferOnChain({
-        signer: keypair,
-        to: SUI_TREASURY_ADDRESS,
-        amount: amount,
-        coinType: USDT_TYPE
-      });
+      if (usdtAmount > 0) {
+        console.log(`Topping up ${usdtAmount} USDT from on-chain...`);
+        await transferOnChain({
+          signer: keypair,
+          to: SUI_TREASURY_ADDRESS,
+          amount: usdtAmount,
+          coinType: USDT_TYPE
+        });
+      }
       
-      console.log("On-chain transfer successful:", result.digest);
+      if (usdcAmount > 0) {
+        console.log(`Topping up ${usdcAmount} USDC from on-chain...`);
+        await transferOnChain({
+          signer: keypair,
+          to: SUI_TREASURY_ADDRESS,
+          amount: usdcAmount,
+          coinType: USDC_TYPE
+        });
+      }
       
       // 2. Update Firestore wallet balance
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
-        walletBalance: balances.wallet + amount
+        walletBalance: balances.wallet + totalAmount
+      });
+
+      // Add notification
+      await setDoc(doc(collection(db, "notifications")), {
+        uid: user.uid,
+        type: "TOP_UP",
+        title: "Wallet Topped Up",
+        message: `Successfully topped up ${totalAmount.toFixed(2)} USD from on-chain assets.`,
+        amount: totalAmount,
+        asset: "USD",
+        timestamp: new Date().toISOString(),
+        read: false
       });
       
-      alert(`Successfully topped up ${amount.toFixed(2)} USDT!`);
+      alert(`Successfully topped up ${totalAmount.toFixed(2)} USD!`);
       refreshBalances(address);
     } catch (e: any) {
       console.error("Top up failed:", e);
@@ -167,42 +217,100 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       </div>
 
       {/* Balances Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-6">
-        <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden group shadow-xl">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+        {/* SUI Balance */}
+        <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-6 relative overflow-hidden group shadow-xl">
           <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
-            <RefreshCw size={60} className="text-orange-500 md:w-[120px] md:h-[120px]" />
+            <RefreshCw size={60} className="text-orange-500" />
           </div>
           <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">Sui Balance (Gas)</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-5xl font-bold tracking-tighter">{balances.sui.toFixed(4)}</h3>
-            <span className="text-orange-500 font-bold mb-0.5 md:mb-2 text-[10px] md:text-base">SUI</span>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.sui.toFixed(4)}</h3>
+            <span className="text-orange-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">SUI</span>
           </div>
           <div className="mt-3 md:mt-6 flex items-center gap-1.5 text-[8px] md:text-xs text-green-400 bg-green-400/10 w-fit px-2 md:px-3 py-1 rounded-full">
             <ShieldCheck size={10} className="md:w-3 md:h-3" />
-            <span>Secured by zkLogin</span>
+            <span>Secured</span>
           </div>
         </div>
 
-        <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden group shadow-xl">
+        {/* USDT Balance */}
+        <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-6 relative overflow-hidden group shadow-xl">
           <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
-            <TrendingUp size={60} className="text-blue-500 md:w-[120px] md:h-[120px]" />
+            <TrendingUp size={60} className="text-green-500" />
           </div>
-          <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">Wallet Balance (USDT)</p>
+          <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">On-chain USDT</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-5xl font-bold tracking-tighter">{balances.wallet.toFixed(2)}</h3>
-            <span className="text-blue-500 font-bold mb-0.5 md:mb-2 text-[10px] md:text-base">USDT</span>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.usdt.toFixed(2)}</h3>
+            <span className="text-green-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USDT</span>
           </div>
-          <div className="mt-2 text-[8px] md:text-[10px] text-white/20 font-mono">
-            On-chain: {balances.usdt.toFixed(2)} USDT
+          <p className="mt-2 text-[8px] md:text-[10px] text-white/20">Available for trading top-up</p>
+        </div>
+
+        {/* USDC Balance */}
+        <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-6 relative overflow-hidden group shadow-xl">
+          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
+            <TrendingUp size={60} className="text-blue-500" />
+          </div>
+          <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">On-chain USDC</p>
+          <div className="flex items-end gap-1.5 md:gap-3">
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.usdc.toFixed(2)}</h3>
+            <span className="text-blue-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USDC</span>
+          </div>
+          <p className="mt-2 text-[8px] md:text-[10px] text-white/20">Available for trading top-up</p>
+        </div>
+
+        {/* Trading Wallet Balance */}
+        <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-6 relative overflow-hidden group shadow-xl">
+          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
+            <Zap size={60} className="text-orange-500" />
+          </div>
+          <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">Trading Wallet</p>
+          <div className="flex items-end gap-1.5 md:gap-3">
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter text-orange-500">{balances.wallet.toFixed(2)}</h3>
+            <span className="text-white/40 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USD</span>
           </div>
           <button 
             onClick={handleTopUp}
-            disabled={toppingUp || balances.usdt <= 0}
-            className="mt-3 md:mt-4 w-full bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold py-2 md:py-3 rounded-lg md:rounded-2xl hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2 text-[10px] md:text-base disabled:opacity-50"
+            disabled={toppingUp || (balances.usdt <= 0 && balances.usdc <= 0)}
+            className="mt-3 md:mt-4 w-full bg-orange-500/10 border border-orange-500/20 text-orange-500 font-bold py-2 rounded-lg md:rounded-xl hover:bg-orange-500/20 transition-all flex items-center justify-center gap-2 text-[10px] md:text-xs disabled:opacity-50"
           >
-            <Plus size={14} className="md:w-4.5 md:h-4.5" />
-            <span>{toppingUp ? "Processing..." : "Top Up from On-chain"}</span>
+            <Plus size={14} />
+            <span>{toppingUp ? "Processing..." : "Top Up"}</span>
           </button>
+        </div>
+      </div>
+
+      {/* Notifications Section */}
+      <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden group shadow-xl">
+        <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
+          <Bell size={60} className="text-purple-500 md:w-[120px] md:h-[120px]" />
+        </div>
+        <div className="flex items-center gap-3 mb-4 md:mb-6">
+          <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+            <Bell size={20} />
+          </div>
+          <h3 className="text-base md:text-xl font-bold tracking-tight">System Notifications</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+          {notifications.length > 0 ? (
+            notifications.map((n) => (
+              <div key={n.id} className="flex items-start gap-3 p-3 md:p-4 bg-white/5 rounded-xl border border-white/5 hover:bg-white/10 transition-colors">
+                <div className={`p-2 rounded-lg shrink-0 ${n.type === 'TRADE_STOPPED' ? 'bg-green-400/10 text-green-400' : 'bg-blue-400/10 text-blue-400'}`}>
+                  {n.type === 'TRADE_STOPPED' ? <CheckCircle2 size={16} /> : <Info size={16} />}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs md:text-sm font-bold truncate">{n.title}</p>
+                  <p className="text-[10px] md:text-xs text-white/40 line-clamp-2 mt-1">{n.message}</p>
+                  <p className="text-[8px] md:text-[10px] text-white/20 mt-2 font-mono">{new Date(n.timestamp).toLocaleString()}</p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="col-span-full py-8 text-center bg-white/5 rounded-xl border border-dashed border-white/10">
+              <p className="text-xs md:text-sm text-white/20 italic">No recent notifications</p>
+            </div>
+          )}
         </div>
       </div>
 

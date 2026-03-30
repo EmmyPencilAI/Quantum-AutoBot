@@ -56,7 +56,8 @@ const App: React.FC = () => {
                 suiWallet: keypair.toSuiAddress(),
                 suiBalance: 0,
                 walletBalance: 5000, // Starting wallet balance
-                usdtBalance: 0, // Starting trading balance (must be funded)
+                usdtBalance: 0, 
+                usdcBalance: 0,
                 totalProfit: 0,
                 activeStrategy: "None",
                 isTrading: false,

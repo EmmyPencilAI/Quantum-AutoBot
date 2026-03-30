@@ -1,5 +1,5 @@
 import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
-import { Transaction } from "@mysten/sui/transactions";
+import { TransactionBlock } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 // Connect to Sui Devnet or Testnet
@@ -10,8 +10,10 @@ export const suiClient = new SuiClient({
 export const SUI_CONTRACT_ADDRESS = import.meta.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
 export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS || "0xe7768fa3f1907ddfd5bda7d7760e637b9d5a4887fa3f94482bc20a11e37db472";
 
-// USDT on Sui Testnet (Example ID)
+// USDT on Sui Testnet
 export const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad::coin::COIN";
+// USDC on Sui Testnet (Common ID)
+export const USDC_TYPE = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC";
 
 /**
  * Simplified zkLogin wallet derivation for the AI Studio environment.
@@ -43,6 +45,25 @@ export async function getUsdtBalance(address: string) {
   }
 }
 
+export async function getUsdcBalance(address: string) {
+  try {
+    const balance = await suiClient.getBalance({ owner: address, coinType: USDC_TYPE });
+    return Number(balance.totalBalance) / 1e6; // USDC usually has 6 decimals
+  } catch (e) {
+    console.error("Error fetching USDC balance:", e);
+    return 0;
+  }
+}
+
+export async function getAllBalances(address: string) {
+  const [sui, usdt, usdc] = await Promise.all([
+    getSuiBalance(address),
+    getUsdtBalance(address),
+    getUsdcBalance(address)
+  ]);
+  return { sui, usdt, usdc };
+}
+
 /**
  * Real on-chain transfer for USDT or SUI
  */
@@ -53,7 +74,7 @@ export async function transferOnChain(params: {
   coinType?: string;
 }) {
   const { signer, to, amount, coinType } = params;
-  const txb = new Transaction();
+  const txb = new TransactionBlock();
 
   if (!coinType || coinType.includes("sui::SUI")) {
     // SUI Transfer
@@ -78,9 +99,9 @@ export async function transferOnChain(params: {
     txb.transferObjects([coin], to);
   }
 
-  const result = await suiClient.signAndExecuteTransaction({
+  const result = await suiClient.signAndExecuteTransactionBlock({
     signer,
-    transaction: txb,
+    transactionBlock: txb,
   });
 
   return result;

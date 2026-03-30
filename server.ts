@@ -8,7 +8,7 @@ import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
 import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
-import { Transaction } from "@mysten/sui/transactions";
+import { TransactionBlock } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { fromHex } from "@mysten/sui/utils";
 
@@ -197,13 +197,17 @@ async function processBackgroundTrades() {
         case "Conservative": profitFactor = 0.00005; break;
       }
       
+      const tradingAsset = userData.tradingAsset || "USDT";
+      const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+      const currentAssetBalance = userData[balanceField] || 0;
+
       // Randomize slightly
-      const actualProfit = (userData.usdtBalance || 1000) * profitFactor * (Math.random() * 2 - 0.8);
-      const newBalance = (userData.usdtBalance || 0) + actualProfit;
+      const actualProfit = currentAssetBalance * profitFactor * (Math.random() * 2 - 0.8);
+      const newBalance = currentAssetBalance + actualProfit;
       const newTotalProfit = (userData.totalProfit || 0) + actualProfit;
       
       batch.update(userDoc.ref, {
-        usdtBalance: newBalance,
+        [balanceField]: newBalance,
         totalProfit: newTotalProfit,
         lastTradeAt: now
       });
@@ -217,6 +221,7 @@ async function processBackgroundTrades() {
           pair: userData.activePair || "BTC/USDT",
           type: actualProfit >= 0 ? "Buy" : "Sell",
           amount: tradeAmount,
+          asset: tradingAsset,
           price: 65000 + (Math.random() * 1000 - 500),
           pnl: actualProfit,
           duration: Math.floor(Math.random() * 60) + 10, // Simulated duration in seconds
@@ -225,7 +230,7 @@ async function processBackgroundTrades() {
 
         // Post significant trades to community
         if (tradeAmount > 500) {
-          const tradeMsg = `🚀 Trade Update: ${userData.displayName || 'A trader'} just executed a ${tradeAmount.toFixed(2)} USDT ${actualProfit >= 0 ? 'Buy' : 'Sell'} on ${userData.activePair || 'BTC/USDT'}!`;
+          const tradeMsg = `🚀 Trade Update: ${userData.displayName || 'A trader'} just executed a ${tradeAmount.toFixed(2)} ${tradingAsset} ${actualProfit >= 0 ? 'Buy' : 'Sell'} on ${userData.activePair || 'BTC/USDT'}!`;
           await db.collection("posts").add({
             authorUid: "system-bot",
             authorName: "Quantum Bot",
@@ -282,16 +287,19 @@ async function startServer() {
       if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
 
       const userData = userDoc.data();
-      const currentBalance = userData.usdtBalance || 0;
+      const tradingAsset = userData.tradingAsset || "USDT";
+      const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+      
+      const currentAssetBalance = userData[balanceField] || 0;
       const initialInvestment = userData.initialInvestment || 0;
-      const profit = currentBalance - initialInvestment;
+      const profit = currentAssetBalance - initialInvestment;
 
       // Calculate shares (50/50 split on profit)
       const userProfitShare = profit > 0 ? profit * 0.5 : profit;
       const treasuryShare = profit > 0 ? profit * 0.5 : 0;
       const totalToUser = initialInvestment + userProfitShare;
 
-      console.log(`Settling for ${uid}: Current=${currentBalance}, Initial=${initialInvestment}, Profit=${profit}, ToUser=${totalToUser}, ToTreasury=${treasuryShare}`);
+      console.log(`Settling for ${uid}: Asset=${tradingAsset}, Current=${currentAssetBalance}, Initial=${initialInvestment}, Profit=${profit}, ToUser=${totalToUser}, ToTreasury=${treasuryShare}`);
       console.log(`Using Treasury: ${SUI_TREASURY_ADDRESS}, Contract: ${SUI_CONTRACT_ADDRESS}`);
 
       // Update Firestore
@@ -300,16 +308,29 @@ async function startServer() {
 
       await userRef.update({
         isTrading: false,
-        usdtBalance: 0,
+        [balanceField]: 0,
         initialInvestment: 0,
         walletBalance: newWalletBalance,
         lastSettlement: {
           amount: totalToUser,
           profit: userProfitShare,
           treasury: treasuryShare,
+          asset: tradingAsset,
           treasuryAddress: SUI_TREASURY_ADDRESS,
           timestamp: new Date().toISOString()
         }
+      });
+
+      // Create notification
+      await db.collection("notifications").add({
+        uid,
+        type: "TRADE_STOPPED",
+        title: "Trading Stopped",
+        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet.`,
+        amount: totalToUser,
+        asset: tradingAsset,
+        timestamp: new Date().toISOString(),
+        read: false
       });
 
       // Post settlement to community
@@ -319,7 +340,7 @@ async function startServer() {
           authorName: "Quantum Bot",
           authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
           authorWallet: "0x0000000000000000000000000000000000000000",
-          content: `🎉 Settlement Update: ${userData.displayName || 'A trader'} just settled a trading session with ${profit.toFixed(2)} USDT profit! Shared 50/50 with Treasury.`,
+          content: `🎉 Settlement Update: ${userData.displayName || 'A trader'} just settled a trading session with ${profit.toFixed(2)} ${tradingAsset} profit! Shared 50/50 with Treasury.`,
           likesCount: 0,
           createdAt: new Date().toISOString()
         });
@@ -337,8 +358,7 @@ async function startServer() {
           // Assuming the private key is in hex format (common for Sui)
           const secretKey = fromHex(process.env.SUI_PRIVATE_KEY.replace("0x", ""));
           const keypair = Ed25519Keypair.fromSecretKey(secretKey);
-          
-          const txb = new Transaction();
+          const txb = new TransactionBlock();
           
           // In a real Move contract, you'd have a function like:
           // public entry fun settle(principal: u64, profit: u64, user: address, treasury: address, ctx: &mut TxContext)
@@ -357,7 +377,7 @@ async function startServer() {
             ]
           });
           */
-
+ 
           // For this demo, we'll perform a real SUI transfer to simulate activity if the contract call fails
           // or just sign and execute a dummy transaction to show "Real" blockchain interaction.
           // Let's do a small SUI transfer to the user as a "gas rebate" or similar to show real TX.
@@ -366,9 +386,9 @@ async function startServer() {
             const [coin] = txb.splitCoins(txb.gas, [1000000]); // 0.001 SUI
             txb.transferObjects([coin], walletAddress);
             
-            const result = await suiClient.signAndExecuteTransaction({
+            const result = await suiClient.signAndExecuteTransactionBlock({
               signer: keypair,
-              transaction: txb,
+              transactionBlock: txb,
             });
             
             txHash = result.digest;
