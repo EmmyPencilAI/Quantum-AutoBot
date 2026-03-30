@@ -8,16 +8,28 @@ import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
 import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { decodeSuiPrivateKey as decodeSuiPrivateKeySDK } from "@mysten/sui/cryptography";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { fromHex } from "@mysten/sui/utils";
 
 dotenv.config();
 
+// Helper to decode Sui private key (handles both hex and suiprivkey format)
+function decodeSuiPrivateKey(key: string): Uint8Array {
+  const cleanKey = key.trim();
+  if (cleanKey.startsWith("suiprivkey")) {
+    const { secretKey } = decodeSuiPrivateKeySDK(cleanKey);
+    return secretKey;
+  }
+  // Remove 0x prefix if present and decode hex
+  return fromHex(cleanKey.replace("0x", ""));
+}
+
 // Sui Client for Backend
 const suiClient = new SuiClient({ 
   url: getFullnodeUrl("testnet"),
-  network: "testnet"
+  network: "testnet",
 });
 
 // Load Firebase Config
@@ -266,11 +278,25 @@ if (db) {
 
 // Sui Config (Mirroring src/lib/sui.ts)
 const SUI_RPC_URL = "https://fullnode.testnet.sui.io:443";
+const SUI_TYPE = "0x2::sui::SUI";
 const SUI_CONTRACT_ADDRESS = process.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
 const SUI_TREASURY_ADDRESS = process.env.VITE_SUI_TREASURY_ADDRESS || "0xe7768fa3f1907ddfd5bda7d7760e637b9d5a4887fa3f94482bc20a11e37db472";
 
-// Example USDT Type on Sui Testnet
-const USDT_TYPE = `${SUI_CONTRACT_ADDRESS}::coin::COIN`;
+// USDT on Sui Testnet
+const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad::coin::COIN";
+// USDC on Sui Testnet
+const USDC_TYPE = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC";
+
+async function getDecimals(coinType: string): Promise<number> {
+  if (coinType === SUI_TYPE || coinType.includes("sui::SUI")) return 9;
+  try {
+    const metadata = await suiClient.getCoinMetadata({ coinType });
+    return metadata?.decimals ?? 6;
+  } catch (e) {
+    console.error("Error fetching coin metadata:", e);
+    return 6;
+  }
+}
 
 async function startServer() {
   const app = express();
@@ -309,14 +335,36 @@ async function startServer() {
       if (process.env.SUI_PRIVATE_KEY) {
         try {
           console.log(`Attempting REAL on-chain withdrawal for ${walletAddress} on Sui...`);
-          const secretKey = fromHex(process.env.SUI_PRIVATE_KEY.replace("0x", ""));
+          const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
           const keypair = Ed25519Keypair.fromSecretKey(secretKey);
           const txb = new Transaction();
-          
-          // For now, we'll do a SUI transfer as a placeholder for USDT/USDC if the contract isn't fully ready
-          // In a real app, you'd transfer the specific coinType (USDT/USDC)
-          const [coin] = txb.splitCoins(txb.gas, [Math.floor(amount * 1e6)]); // Using SUI as proxy for demo if USDT not available
-          txb.transferObjects([coin], walletAddress);
+          const coinType = asset === "SUI" ? SUI_TYPE : (asset === "USDC" ? USDC_TYPE : USDT_TYPE);
+          const decimals = await getDecimals(coinType);
+          const rawAmount = Math.floor(amount * Math.pow(10, decimals));
+
+          if (asset === "SUI") {
+            const [coin] = txb.splitCoins(txb.gas, [rawAmount]);
+            txb.transferObjects([coin], walletAddress);
+          } else {
+            // Token Transfer (USDT/USDC)
+            const coins = await suiClient.getCoins({
+              owner: keypair.toSuiAddress(),
+              coinType: coinType,
+            });
+
+            if (coins.data.length === 0) throw new Error(`No ${asset} coins found in treasury`);
+
+            const coinObjectIds = coins.data.map((c) => c.coinObjectId);
+            const primaryCoin = coinObjectIds[0];
+            const rest = coinObjectIds.slice(1);
+            
+            if (rest.length > 0) {
+              txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
+            }
+
+            const [coin] = txb.splitCoins(txb.object(primaryCoin), [rawAmount]);
+            txb.transferObjects([coin], walletAddress);
+          }
           
           const result = await suiClient.signAndExecuteTransaction({
             signer: keypair,
@@ -324,13 +372,13 @@ async function startServer() {
           });
           
           txHash = result.digest;
+          await suiClient.waitForTransaction({ digest: txHash });
           console.log(`Real Sui Withdrawal TX: ${txHash}`);
         } catch (e: any) {
           console.error("Real Sui withdrawal failed:", e);
           onChainError = e.message || "Sui blockchain transaction failed";
           
-          // Rollback Firestore if on-chain fails? 
-          // In a real app, yes. For now, we'll just log it.
+          // Rollback Firestore if on-chain fails
           await userRef.update({
             walletBalance: currentWalletBalance // Rollback
           });
@@ -439,39 +487,33 @@ async function startServer() {
 
       if (process.env.SUI_PRIVATE_KEY) {
         try {
+          const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
+          const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+          
           console.log(`Attempting REAL on-chain settlement for ${walletAddress || uid} on Sui...`);
           
-          // Initialize signer from private key
-          // Assuming the private key is in hex format (common for Sui)
-          const secretKey = fromHex(process.env.SUI_PRIVATE_KEY.replace("0x", ""));
-          const keypair = Ed25519Keypair.fromSecretKey(secretKey);
           const txb = new Transaction();
-          
-          // In a real Move contract, you'd have a function like:
-          // public entry fun settle(principal: u64, profit: u64, user: address, treasury: address, ctx: &mut TxContext)
-          
-          // Since we don't have the actual contract deployed with this exact signature,
-          // we'll simulate the Move call but use a real transaction block.
-          // If the contract was real, it would look like this:
-          /*
-          txb.moveCall({
-            target: `${SUI_CONTRACT_ADDRESS}::quantum_finance::settle_trade`,
-            arguments: [
-              txb.pure.u64(Math.floor(initialInvestment * 1e6)), // Assuming 6 decimals for USDT
-              txb.pure.u64(Math.floor(profit * 1e6)),
-              txb.pure.address(walletAddress || userData.walletAddress),
-              txb.pure.address(SUI_TREASURY_ADDRESS)
-            ]
+          const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+          const decimals = await getDecimals(coinType);
+          const rawAmount = Math.floor(totalToUser * Math.pow(10, decimals));
+
+          // Transfer the assets from Treasury back to User
+          const coins = await suiClient.getCoins({
+            owner: keypair.toSuiAddress(),
+            coinType: coinType,
           });
-          */
- 
-          // For this demo, we'll perform a real SUI transfer to simulate activity if the contract call fails
-          // or just sign and execute a dummy transaction to show "Real" blockchain interaction.
-          // Let's do a small SUI transfer to the user as a "gas rebate" or similar to show real TX.
-          
-          if (walletAddress && walletAddress.startsWith("0x")) {
-            const [coin] = txb.splitCoins(txb.gas, [1000000]); // 0.001 SUI
-            txb.transferObjects([coin], walletAddress);
+
+          if (coins.data.length > 0) {
+            const coinObjectIds = coins.data.map((c) => c.coinObjectId);
+            const primaryCoin = coinObjectIds[0];
+            const rest = coinObjectIds.slice(1);
+            
+            if (rest.length > 0) {
+              txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
+            }
+
+            const [coin] = txb.splitCoins(txb.object(primaryCoin), [rawAmount]);
+            txb.transferObjects([coin], walletAddress || userData.walletAddress);
             
             const result = await suiClient.signAndExecuteTransaction({
               signer: keypair,
@@ -479,9 +521,11 @@ async function startServer() {
             });
             
             txHash = result.digest;
-            console.log(`Real Sui Settlement TX (Gas Rebate): ${txHash}`);
+            await suiClient.waitForTransaction({ digest: txHash });
+            console.log(`Real Sui Settlement TX: ${txHash}`);
           } else {
-            console.warn("No valid wallet address for on-chain settlement, skipping real TX.");
+            console.warn(`No ${tradingAsset} coins found in treasury for settlement`);
+            onChainError = `No ${tradingAsset} coins found in treasury`;
           }
         } catch (e: any) {
           console.error("Real Sui settlement failed:", e);

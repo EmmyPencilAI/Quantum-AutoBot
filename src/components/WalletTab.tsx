@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap } from "lucide-react";
+import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
 import { motion } from "motion/react";
-import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS } from "../lib/sui";
+import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { Bell, CheckCircle2, Info, AlertCircle } from "lucide-react";
+
+import { toast } from "sonner";
 
 interface WalletTabProps {
   user: any;
@@ -20,6 +22,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     recipient: "",
     amount: "",
     chain: "Sui",
+    asset: "USDT",
   });
   const [sending, setSending] = useState(false);
   const [toppingUp, setToppingUp] = useState(false);
@@ -32,8 +35,10 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const [withdrawing, setWithdrawing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [isRequestingGas, setIsRequestingGas] = useState(false);
 
   const chains = ["Sui", "BNB Chain", "Tron", "Solana"];
+  const assets = ["SUI", "USDT", "USDC"];
 
   useEffect(() => {
     if (user) {
@@ -62,6 +67,21 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleRequestGas = async () => {
+    if (!address) return;
+    setIsRequestingGas(true);
+    toast.loading("Requesting Testnet SUI...", { id: "gas" });
+    try {
+      await requestTestnetGas(address);
+      toast.success("Gas requested! It may take a minute to reflect in your balance.", { id: "gas" });
+      setTimeout(() => refreshBalances(address), 5000);
+    } catch (error: any) {
+      toast.error(`Faucet failed: ${error.message}`, { id: "gas" });
+    } finally {
+      setIsRequestingGas(false);
+    }
+  };
+
   const refreshBalances = async (addr: string) => {
     setLoading(true);
     try {
@@ -83,12 +103,20 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const handleSend = async () => {
     if (!sendParams.recipient || !sendParams.amount) return;
     setSending(true);
+    toast.loading("Sending transaction...", { id: "send" });
     try {
+      const keypair = deriveSuiWallet(user.uid);
+      let coinType = USDT_TYPE;
+      if (sendParams.asset === "SUI") coinType = "0x2::sui::SUI";
+      if (sendParams.asset === "USDC") coinType = USDC_TYPE;
+
       const result = await crossChainTransfer({
+        signer: keypair,
         fromAddress: address,
         toAddress: sendParams.recipient,
         amount: parseFloat(sendParams.amount),
         destinationChain: sendParams.chain,
+        coinType: coinType
       });
       console.log("Transfer successful:", result);
       
@@ -97,17 +125,19 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         uid: user.uid,
         type: "TRANSFER_SENT",
         title: "Transfer Sent",
-        message: `Successfully sent ${sendParams.amount} USDT to ${sendParams.recipient.slice(0, 6)}... on ${sendParams.chain}.`,
+        message: `Successfully sent ${sendParams.amount} ${sendParams.asset} to ${sendParams.recipient.slice(0, 6)}... on ${sendParams.chain}.`,
         amount: parseFloat(sendParams.amount),
-        asset: "USDT",
+        asset: sendParams.asset,
         timestamp: new Date().toISOString(),
         read: false
       });
 
+      toast.success(`Successfully sent ${sendParams.amount} ${sendParams.asset}!`, { id: "send" });
       setShowSendModal(false);
       refreshBalances(address);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Transfer failed:", e);
+      toast.error("Transfer failed: " + (e.message || "Unknown error"), { id: "send" });
     } finally {
       setSending(false);
     }
@@ -115,11 +145,12 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
 
   const handleDeposit = async () => {
     if (balances.usdt <= 0 && balances.usdc <= 0) {
-      alert("No USDT or USDC found on-chain to deposit.");
+      toast.error("No USDT or USDC found on-chain to deposit.");
       return;
     }
     
     setToppingUp(true);
+    toast.loading("Processing deposit...", { id: "deposit" });
     try {
       const keypair = deriveSuiWallet(user.uid);
       
@@ -166,11 +197,11 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         read: false
       });
       
-      alert(`Successfully deposited ${totalAmount.toFixed(2)} USD!`);
+      toast.success(`Successfully deposited ${totalAmount.toFixed(2)} USD!`, { id: "deposit" });
       refreshBalances(address);
     } catch (e: any) {
       console.error("Deposit failed:", e);
-      alert("Deposit failed: " + (e.message || "Unknown error"));
+      toast.error("Deposit failed: " + (e.message || "Unknown error"), { id: "deposit" });
     } finally {
       setToppingUp(false);
     }
@@ -179,16 +210,17 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const handleWithdraw = async () => {
     const amount = parseFloat(withdrawParams.amount);
     if (isNaN(amount) || amount <= 0) {
-      alert("Please enter a valid amount.");
+      toast.error("Please enter a valid amount.");
       return;
     }
 
     if (amount > balances.wallet) {
-      alert("Insufficient trading wallet balance.");
+      toast.error("Insufficient trading wallet balance.");
       return;
     }
 
     setWithdrawing(true);
+    toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
       const response = await fetch("/api/wallet/withdraw", {
         method: "POST",
@@ -203,7 +235,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
 
       const result = await response.json();
       if (result.success) {
-        alert(`Successfully withdrawn ${amount} ${withdrawParams.asset} to your on-chain wallet.`);
+        toast.success(`Successfully withdrawn ${amount} ${withdrawParams.asset} to your on-chain wallet.`, { id: "withdraw" });
         setShowWithdrawModal(false);
         refreshBalances(address);
       } else {
@@ -211,7 +243,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       }
     } catch (e: any) {
       console.error("Withdrawal failed:", e);
-      alert("Withdrawal failed: " + (e.message || "Unknown error"));
+      toast.error("Withdrawal failed: " + (e.message || "Unknown error"), { id: "withdraw" });
     } finally {
       setWithdrawing(false);
     }
@@ -275,9 +307,19 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
             <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.sui.toFixed(4)}</h3>
             <span className="text-orange-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">SUI</span>
           </div>
-          <div className="mt-3 md:mt-6 flex items-center gap-1.5 text-[8px] md:text-xs text-green-400 bg-green-400/10 w-fit px-2 md:px-3 py-1 rounded-full">
-            <ShieldCheck size={10} className="md:w-3 md:h-3" />
-            <span>Secured</span>
+          <div className="mt-3 md:mt-6 flex flex-wrap gap-2">
+            <div className="flex items-center gap-1.5 text-[8px] md:text-xs text-green-400 bg-green-400/10 w-fit px-2 md:px-3 py-1 rounded-full">
+              <ShieldCheck size={10} className="md:w-3 md:h-3" />
+              <span>Secured</span>
+            </div>
+            <button
+              onClick={handleRequestGas}
+              disabled={isRequestingGas}
+              className="flex items-center gap-1.5 text-[8px] md:text-xs text-blue-400 bg-blue-400/10 w-fit px-2 md:px-3 py-1 rounded-full hover:bg-blue-400/20 transition-colors disabled:opacity-50"
+            >
+              <Droplets size={10} className={`md:w-3 md:h-3 ${isRequestingGas ? "animate-pulse" : ""}`} />
+              <span>{isRequestingGas ? "Requesting..." : "Get Gas"}</span>
+            </button>
           </div>
         </div>
 
@@ -418,6 +460,25 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
             
             <div className="space-y-4">
               <div>
+                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Asset</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {assets.map((asset) => (
+                    <button
+                      key={asset}
+                      onClick={() => setSendParams({ ...sendParams, asset })}
+                      className={`py-2 md:py-3 rounded-lg md:rounded-xl border font-bold text-[10px] md:text-sm transition-all ${
+                        sendParams.asset === asset
+                          ? "bg-orange-500 border-orange-500 text-black"
+                          : "bg-white/5 border-white/10 text-white/60 hover:border-white/20"
+                      }`}
+                    >
+                      {asset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
                 <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Destination Chain</label>
                 <div className="grid grid-cols-2 gap-2">
                   {chains.map((chain) => (
@@ -448,7 +509,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
               </div>
 
               <div>
-                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Amount (USDT)</label>
+                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Amount ({sendParams.asset})</label>
                 <input
                   type="number"
                   placeholder="0.00"

@@ -6,6 +6,8 @@ import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
 import { deriveSuiWallet, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
 
+import { toast } from "sonner";
+
 interface TradingTabProps {
   user: any;
 }
@@ -84,21 +86,24 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       
       if (isTrading) {
         // Settlement logic
+        toast.loading("Settling trades on-chain...", { id: "settle" });
+        const address = deriveSuiWallet(user.uid).toSuiAddress();
         const response = await fetch("/api/trading/settle", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uid: user.uid })
+          body: JSON.stringify({ uid: user.uid, walletAddress: address })
         });
         const result = await response.json();
         if (result.success) {
           console.log("Settlement successful:", result);
+          toast.success("Settlement successful! Funds returned to wallet.", { id: "settle" });
         } else {
           throw new Error(result.error || "Settlement failed");
         }
       } else {
         // Start trading
         if (initialInvestment <= 0) {
-          alert("Please fund your trading account first.");
+          toast.error("Please fund your trading account first.");
           setLoading(false);
           return;
         }
@@ -107,9 +112,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           activeStrategy: strategy,
           activePair: selectedPair
         });
+        toast.success("Trading engine started!");
       }
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    } catch (e: any) {
+      console.error("Trading toggle failed:", e);
+      toast.error("Action failed: " + (e.message || "Unknown error"), { id: "settle" });
     } finally {
       setLoading(false);
     }
@@ -118,14 +125,14 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const fundTrading = async () => {
     if (!user || isTrading) return;
     const amount = parseFloat(fundAmount);
-    if (isNaN(amount) || amount <= 0) return;
+    if (isNaN(amount) || amount <= 0) {
+      toast.error("Please enter a valid amount to fund.");
+      return;
+    }
 
     setLoading(true);
+    toast.loading("Processing funding...", { id: "fund" });
     try {
-      // Check if we are funding from internal wallet or on-chain
-      // For simplicity, we'll check internal wallet first, then on-chain if needed
-      // Or we can add a toggle. Let's add a toggle or just check internal first.
-      
       if (amount <= walletBalance) {
         // 1. Fund from internal wallet (Firestore only)
         console.log(`Funding ${amount} from internal wallet...`);
@@ -140,15 +147,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           totalProfit: 0
         });
 
-        // Add notification
-        await setDoc(doc(collection(db, "notifications")), {
-          uid: user.uid,
-          type: "TRADE_STARTED",
-          title: "Trading Funded from Wallet",
-          message: `Successfully funded ${amount.toFixed(2)} ${tradingAsset} from your internal trading wallet. Trading started.`,
-          timestamp: new Date().toISOString(),
-          read: false
-        });
+        toast.success(`Successfully funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
       } else {
         // 2. Fund from on-chain (requires transfer to treasury)
         const address = deriveSuiWallet(user.uid).toSuiAddress();
@@ -157,13 +156,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
 
         if (amount > currentOnChainBalance) {
-          alert(`Insufficient balance. You have ${walletBalance.toFixed(2)} in internal wallet and ${currentOnChainBalance.toFixed(2)} on-chain.`);
+          toast.error(`Insufficient balance. You have ${walletBalance.toFixed(2)} in internal wallet and ${currentOnChainBalance.toFixed(2)} on-chain.`, { id: "fund" });
           setLoading(false);
           return;
         }
 
         if (balances.sui < 0.01) {
-          alert("Insufficient SUI for gas. Please receive some SUI first.");
+          toast.error("Insufficient SUI for gas. Please receive some SUI first.", { id: "fund" });
           setLoading(false);
           return;
         }
@@ -187,21 +186,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           totalProfit: 0
         });
 
-        // Add notification
-        await setDoc(doc(collection(db, "notifications")), {
-          uid: user.uid,
-          type: "TRADE_STARTED",
-          title: "Trading Funded On-chain",
-          message: `Successfully funded ${amount.toFixed(2)} ${tradingAsset} from your on-chain wallet. Trading started.`,
-          timestamp: new Date().toISOString(),
-          read: false
-        });
+        toast.success(`Successfully funded ${amount} ${tradingAsset} from on-chain!`, { id: "fund" });
       }
-
       setFundAmount("0");
     } catch (e: any) {
       console.error("Funding failed:", e);
-      alert("Funding failed: " + (e.message || "Unknown error"));
+      toast.error("Funding failed: " + (e.message || "Unknown error"), { id: "fund" });
     } finally {
       setLoading(false);
     }
@@ -215,8 +205,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       await updateDoc(userRef, {
         activeStrategy: newStrategy
       });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    } catch (e: any) {
+      console.error("Strategy change failed:", e);
+      alert("Strategy change failed: " + (e.message || "Unknown error"));
     }
   };
 
@@ -228,8 +219,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       await updateDoc(userRef, {
         activePair: newPair
       });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    } catch (e: any) {
+      console.error("Pair change failed:", e);
+      alert("Pair change failed: " + (e.message || "Unknown error"));
     }
   };
 
