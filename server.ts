@@ -303,6 +303,12 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
+  // Global request logger for debugging 404s
+  app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+  });
+
   // Wallet Withdrawal Endpoint
   app.post("/api/wallet/withdraw", async (req, res) => {
     if (!db) return res.status(500).json({ error: "Database not initialized" });
