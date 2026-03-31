@@ -9,8 +9,18 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "emmanuelobed877@gmail.com" && request.auth.token.email_verified == true));
+    }
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
     }
 
     function isValidUser(data) {
@@ -42,6 +52,13 @@ service cloud.firestore {
              (data.authorAvatar is string || !('authorAvatar' in data)) &&
              (data.likesCount is number || !('likesCount' in data)) &&
              (data.commentsCount is number || !('commentsCount' in data));
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['uid', 'content', 'createdAt']) &&
+             data.uid is string &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 1000 &&
+             data.createdAt is string;
     }
 
     function isValidTrade(data) {
@@ -78,11 +95,25 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isAuthenticated() && isValidPost(request.resource.data);
       allow update: if isAuthenticated() && (
-        (request.auth.uid == resource.data.authorUid || request.auth.uid == 'admin') ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount']) && 
-         request.resource.data.likesCount == resource.data.likesCount + 1)
+        (request.auth.uid == resource.data.authorUid || isAdmin()) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'commentsCount']) && 
+         (math.abs(request.resource.data.likesCount - resource.data.likesCount) == 1 || 
+          request.resource.data.commentsCount == resource.data.commentsCount + 1))
       );
-      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorUid || request.auth.uid == 'admin');
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorUid || isAdmin());
+
+      // Comments subcollection
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isAuthenticated() && isValidComment(request.resource.data);
+        allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.uid || isAdmin());
+      }
+
+      // Likes subcollection
+      match /likes/{userId} {
+        allow read: if true;
+        allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      }
     }
 
     // Trades: Anyone can read (for leaderboard), only system/owner can create.

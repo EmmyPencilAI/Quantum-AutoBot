@@ -305,8 +305,9 @@ async function startServer() {
 
   // Wallet Withdrawal Endpoint
   app.post("/api/wallet/withdraw", async (req, res) => {
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
     const { uid, amount, asset, walletAddress } = req.body;
-    if (!db || !uid || !amount || !walletAddress) return res.status(400).json({ error: "Invalid request" });
+    if (!uid || !amount || !walletAddress) return res.status(400).json({ error: "Invalid request" });
 
     try {
       const userRef = db.collection("users").doc(uid);
@@ -329,9 +330,11 @@ async function startServer() {
       // 2. Perform On-Chain Transfer from Treasury to User
       let txHash = "0x" + Math.random().toString(16).slice(2);
       let onChainError = null;
+      let isSimulated = true;
 
       if (process.env.SUI_PRIVATE_KEY) {
         try {
+          isSimulated = false;
           console.log(`Attempting REAL on-chain withdrawal for ${walletAddress} on Sui...`);
           const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
           const keypair = Ed25519Keypair.fromSecretKey(secretKey);
@@ -401,7 +404,10 @@ async function startServer() {
         success: true,
         newWalletBalance,
         txHash,
-        message: "Withdrawal successful."
+        isSimulated,
+        message: isSimulated 
+          ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
+          : "Withdrawal successful."
       });
     } catch (error: any) {
       console.error("Withdrawal error:", error);
@@ -548,10 +554,18 @@ async function startServer() {
 
   // Community Comments
   app.post("/api/community/comment", async (req, res) => {
+    if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
     try {
       const { postId, uid, authorName, authorAvatar, content } = req.body;
       if (!postId || !uid || !content) {
         return res.status(400).json({ success: false, error: "Missing required fields" });
+      }
+
+      // Check if post exists
+      const postRef = db.collection("posts").doc(postId);
+      const postDoc = await postRef.get();
+      if (!postDoc.exists) {
+        return res.status(404).json({ success: false, error: "Post not found" });
       }
 
       const comment = {
@@ -562,18 +576,20 @@ async function startServer() {
         createdAt: new Date().toISOString()
       };
 
-      await db.collection("posts").doc(postId).collection("comments").add(comment);
-      await db.collection("posts").doc(postId).update({
+      await postRef.collection("comments").add(comment);
+      await postRef.update({
         commentsCount: admin.firestore.FieldValue.increment(1)
       });
 
       res.json({ success: true, comment });
     } catch (error: any) {
+      console.error("Comment error:", error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
 
   app.post("/api/community/like", async (req, res) => {
+    if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
     try {
       const { postId, uid } = req.body;
       if (!postId || !uid) {
@@ -581,6 +597,11 @@ async function startServer() {
       }
 
       const postRef = db.collection("posts").doc(postId);
+      const postDoc = await postRef.get();
+      if (!postDoc.exists) {
+        return res.status(404).json({ success: false, error: "Post not found" });
+      }
+
       const likeRef = postRef.collection("likes").doc(uid);
       const likeDoc = await likeRef.get();
 
@@ -600,6 +621,7 @@ async function startServer() {
         return res.json({ success: true, liked: true });
       }
     } catch (error: any) {
+      console.error("Like error:", error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
