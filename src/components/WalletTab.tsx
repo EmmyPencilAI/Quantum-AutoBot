@@ -233,6 +233,17 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         })
       });
 
+      if (!response.ok) {
+        const text = await response.text();
+        console.error("Withdrawal API error:", text);
+        try {
+          const errorData = JSON.parse(text);
+          throw new Error(errorData.error || `Server error: ${response.status}`);
+        } catch (e) {
+          throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
+        }
+      }
+
       const result = await response.json();
       if (result.success) {
         toast.success(`Successfully withdrawn ${amount} ${withdrawParams.asset} to your on-chain wallet.`, { id: "withdraw" });

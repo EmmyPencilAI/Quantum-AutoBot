@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
-import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { decodeSuiPrivateKey as decodeSuiPrivateKeySDK } from "@mysten/sui/cryptography";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
@@ -29,7 +29,6 @@ function decodeSuiPrivateKey(key: string): Uint8Array {
 // Sui Client for Backend
 const suiClient = new SuiClient({ 
   url: getFullnodeUrl("testnet"),
-  network: "testnet",
 });
 
 // Load Firebase Config
