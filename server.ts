@@ -7,7 +7,8 @@ import dotenv from "dotenv";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
-import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
+import { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
+import { getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { decodeSuiPrivateKey as decodeSuiPrivateKeySDK } from "@mysten/sui/cryptography";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
@@ -27,9 +28,7 @@ function decodeSuiPrivateKey(key: string): Uint8Array {
 }
 
 // Sui Client for Backend
-const suiClient = new SuiClient({ 
-  url: getFullnodeUrl("testnet"),
-});
+const suiClient = new SuiClient({ url: getFullnodeUrl("testnet"), network: "testnet" });
 
 // Load Firebase Config
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
@@ -270,9 +269,9 @@ async function processBackgroundTrades() {
   }
 }
 
-// Run background trading every minute
+// Run background trading every 15 seconds
 if (db) {
-  setInterval(processBackgroundTrades, 60000);
+  setInterval(processBackgroundTrades, 15000);
 }
 
 // Sui Config (Mirroring src/lib/sui.ts)
@@ -539,11 +538,69 @@ async function startServer() {
         treasuryShare,
         txHash,
         onChainError,
-        message: onChainError ? "Settlement recorded, but on-chain transfer failed." : "Settlement successful. Funds returned to wallet."
+        message: onChainError ? `Settlement recorded, but on-chain transfer failed: ${onChainError}` : "Settlement successful. Funds returned to wallet."
       });
     } catch (error: any) {
       console.error("Settlement error:", error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ success: false, error: error.message || "Internal server error" });
+    }
+  });
+
+  // Community Comments
+  app.post("/api/community/comment", async (req, res) => {
+    try {
+      const { postId, uid, authorName, authorAvatar, content } = req.body;
+      if (!postId || !uid || !content) {
+        return res.status(400).json({ success: false, error: "Missing required fields" });
+      }
+
+      const comment = {
+        uid,
+        authorName,
+        authorAvatar,
+        content,
+        createdAt: new Date().toISOString()
+      };
+
+      await db.collection("posts").doc(postId).collection("comments").add(comment);
+      await db.collection("posts").doc(postId).update({
+        commentsCount: admin.firestore.FieldValue.increment(1)
+      });
+
+      res.json({ success: true, comment });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/community/like", async (req, res) => {
+    try {
+      const { postId, uid } = req.body;
+      if (!postId || !uid) {
+        return res.status(400).json({ success: false, error: "Missing required fields" });
+      }
+
+      const postRef = db.collection("posts").doc(postId);
+      const likeRef = postRef.collection("likes").doc(uid);
+      const likeDoc = await likeRef.get();
+
+      if (likeDoc.exists) {
+        // Unlike
+        await likeRef.delete();
+        await postRef.update({
+          likesCount: admin.firestore.FieldValue.increment(-1)
+        });
+        return res.json({ success: true, liked: false });
+      } else {
+        // Like
+        await likeRef.set({ uid, createdAt: new Date().toISOString() });
+        await postRef.update({
+          likesCount: admin.firestore.FieldValue.increment(1)
+        });
+        return res.json({ success: true, liked: true });
+      }
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 

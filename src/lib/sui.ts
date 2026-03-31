@@ -1,12 +1,10 @@
-import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
+import { getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 // Connect to Sui Devnet or Testnet
-export const suiClient = new SuiClient({ 
-  url: getFullnodeUrl("testnet"),
-  network: "testnet",
-});
+export const suiClient = new SuiClient({ url: getFullnodeUrl("testnet"), network: "testnet" });
 
 export const SUI_CONTRACT_ADDRESS = import.meta.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
 export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS || "0xe7768fa3f1907ddfd5bda7d7760e637b9d5a4887fa3f94482bc20a11e37db472";

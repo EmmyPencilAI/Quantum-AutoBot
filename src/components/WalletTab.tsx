@@ -31,6 +31,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const [withdrawParams, setWithdrawParams] = useState({
     amount: "",
     asset: "USDT",
+    externalAddress: "",
   });
   const [withdrawing, setWithdrawing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -229,7 +230,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           uid: user.uid,
           amount,
           asset: withdrawParams.asset,
-          walletAddress: address
+          walletAddress: withdrawParams.externalAddress || address
         })
       });
 
@@ -611,6 +612,18 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
                 <p className="mt-1 text-[10px] text-white/20">Available: {balances.wallet.toFixed(2)} USD</p>
               </div>
 
+              <div>
+                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Destination Address (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="Leave empty for internal wallet"
+                  value={withdrawParams.externalAddress}
+                  onChange={(e) => setWithdrawParams({ ...withdrawParams, externalAddress: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg md:rounded-xl px-3 md:px-4 py-2.5 md:py-3 focus:outline-none focus:border-orange-500 transition-all font-mono text-[10px] md:text-sm"
+                />
+                <p className="mt-1 text-[8px] text-white/20">If empty, funds will be sent to your internal address: {address.slice(0, 8)}...</p>
+              </div>
+
               <div className="bg-orange-500/10 border border-orange-500/20 p-3 md:p-4 rounded-xl md:rounded-2xl space-y-1 md:space-y-2">
                 <div className="flex justify-between text-[9px] md:text-xs">
                   <span className="text-white/40">Network Fee</span>
@@ -618,7 +631,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
                 </div>
                 <div className="flex justify-between text-[9px] md:text-xs">
                   <span className="text-white/40">Destination</span>
-                  <span className="font-bold font-mono">{address.slice(0, 6)}...{address.slice(-6)}</span>
+                  <span className="font-bold font-mono">{(withdrawParams.externalAddress || address).slice(0, 6)}...{(withdrawParams.externalAddress || address).slice(-6)}</span>
                 </div>
               </div>
 

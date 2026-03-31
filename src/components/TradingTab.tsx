@@ -43,20 +43,25 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
     });
 
-    // Fetch trade history for chart
+    // Fetch trade history for chart and activity feed
     const tradesRef = collection(db, "trades");
     const q = query(
       tradesRef,
       where("uid", "==", user.uid),
       orderBy("timestamp", "desc"),
-      limit(100)
+      limit(200)
     );
 
     const unsubscribeTrades = onSnapshot(q, (snapshot) => {
       const trades = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        time: new Date(doc.data().timestamp).toLocaleTimeString(),
+        time: new Date(doc.data().timestamp).toLocaleString(undefined, { 
+          month: 'short', 
+          day: 'numeric', 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }),
         value: doc.data().pnl
       })).reverse();
       
@@ -93,7 +98,18 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ uid: user.uid, walletAddress: address })
         });
-        const result = await response.json();
+        if (!response.ok) {
+        const text = await response.text();
+        console.error("Settlement API error:", text);
+        try {
+          const errorData = JSON.parse(text);
+          throw new Error(errorData.error || `Server error: ${response.status}`);
+        } catch (e) {
+          throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
+        }
+      }
+
+      const result = await response.json();
         if (result.success) {
           console.log("Settlement successful:", result);
           toast.success("Settlement successful! Funds returned to wallet.", { id: "settle" });
@@ -246,18 +262,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   ];
 
   useEffect(() => {
-    let interval: any;
-    if (isTrading) {
-      interval = setInterval(() => {
-        const change = (Math.random() - 0.45) * 5; // Slight upward bias
-        setPnl((prev) => prev + change);
-        setHistory((prev) => [...prev.slice(-19), { time: new Date().toLocaleTimeString(), value: pnl + change }]);
-      }, 2000);
-    } else {
-      clearInterval(interval);
-    }
-    return () => clearInterval(interval);
-  }, [isTrading, pnl]);
+    // The background trading engine in server.ts handles trade generation
+    // We just listen to Firestore updates for real-time data
+    return () => {};
+  }, [isTrading]);
 
   const activePairData = tradingPairs.find(p => p.symbol === selectedPair) || tradingPairs[0];
 
