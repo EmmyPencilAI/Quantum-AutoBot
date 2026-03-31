@@ -347,11 +347,22 @@ async function startServer() {
           const txb = new Transaction();
           const coinType = asset === "SUI" ? SUI_TYPE : (asset === "USDC" ? USDC_TYPE : USDT_TYPE);
           const decimals = await getDecimals(coinType);
-          const rawAmount = Math.floor(amount * Math.pow(10, decimals));
+          
+          // Platform Fee (0.1%)
+          const feePercent = 0.001;
+          const feeAmount = amount * feePercent;
+          const netAmount = amount - feeAmount;
+          
+          const rawNetAmount = Math.floor(netAmount * Math.pow(10, decimals));
+          const rawFeeAmount = Math.floor(feeAmount * Math.pow(10, decimals));
 
           if (asset === "SUI") {
-            const [coin] = txb.splitCoins(txb.gas, [rawAmount]);
-            txb.transferObjects([coin], walletAddress);
+            if (rawFeeAmount > 0) {
+              const [feeCoin] = txb.splitCoins(txb.gas, [rawFeeAmount]);
+              txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+            }
+            const [mainCoin] = txb.splitCoins(txb.gas, [rawNetAmount]);
+            txb.transferObjects([mainCoin], walletAddress);
           } else {
             // Token Transfer (USDT/USDC)
             const coins = await suiClient.getCoins({
@@ -369,9 +380,16 @@ async function startServer() {
               txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
             }
 
-            const [coin] = txb.splitCoins(txb.object(primaryCoin), [rawAmount]);
-            txb.transferObjects([coin], walletAddress);
+            if (rawFeeAmount > 0) {
+              const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
+              txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+            }
+
+            const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
+            txb.transferObjects([mainCoin], walletAddress);
           }
+          
+          txb.setGasBudget(10000000); // 0.01 SUI
           
           const result = await suiClient.signAndExecuteTransaction({
             signer: keypair,
@@ -505,7 +523,14 @@ async function startServer() {
           const txb = new Transaction();
           const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
           const decimals = await getDecimals(coinType);
-          const rawAmount = Math.floor(totalToUser * Math.pow(10, decimals));
+          
+          // Platform Fee (0.1%)
+          const feePercent = 0.001;
+          const feeAmount = totalToUser * feePercent;
+          const netAmount = totalToUser - feeAmount;
+          
+          const rawNetAmount = Math.floor(netAmount * Math.pow(10, decimals));
+          const rawFeeAmount = Math.floor(feeAmount * Math.pow(10, decimals));
 
           // Transfer the assets from Treasury back to User
           const coins = await suiClient.getCoins({
@@ -522,8 +547,15 @@ async function startServer() {
               txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
             }
 
-            const [coin] = txb.splitCoins(txb.object(primaryCoin), [rawAmount]);
-            txb.transferObjects([coin], walletAddress || userData.walletAddress);
+            if (rawFeeAmount > 0) {
+              const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
+              txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+            }
+
+            const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
+            txb.transferObjects([mainCoin], walletAddress || userData.walletAddress);
+            
+            txb.setGasBudget(10000000); // 0.01 SUI
             
             const result = await suiClient.signAndExecuteTransaction({
               signer: keypair,

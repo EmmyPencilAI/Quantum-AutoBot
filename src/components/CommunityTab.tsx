@@ -23,6 +23,7 @@ const formatDateTime = (date: string | number | Date) => {
 
 const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
   const [posts, setPosts] = useState<any[]>([]);
+  const [userLikes, setUserLikes] = useState<Record<string, boolean>>({});
   const [newPost, setNewPost] = useState("");
   const [loading, setLoading] = useState(false);
   const [commentingOn, setCommentingOn] = useState<string | null>(null);
@@ -31,14 +32,31 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
 
   useEffect(() => {
     const q = query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(50));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribePosts = onSnapshot(q, (snapshot) => {
       const postsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setPosts(postsData);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, "posts");
     });
-    return () => unsubscribe();
+    
+    return () => unsubscribePosts();
   }, []);
+
+  useEffect(() => {
+    if (!user || posts.length === 0) return;
+    
+    const unsubscribes: (() => void)[] = [];
+    
+    posts.forEach(post => {
+      const likeRef = doc(db, "posts", post.id, "likes", user.uid);
+      const unsub = onSnapshot(likeRef, (likeDoc) => {
+        setUserLikes(prev => ({ ...prev, [post.id]: likeDoc.exists() }));
+      });
+      unsubscribes.push(unsub);
+    });
+    
+    return () => unsubscribes.forEach(unsub => unsub());
+  }, [user, posts.map(p => p.id).join(",")]);
 
   const handleCreatePost = async () => {
     if (!newPost.trim() || !user) return;
@@ -65,13 +83,22 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
 
   const handleLike = async (postId: string) => {
     if (!user) return;
+    
+    // Optimistic update
+    const isLiked = userLikes[postId];
+    setUserLikes(prev => ({ ...prev, [postId]: !isLiked }));
+    
     try {
       const response = await fetch("/api/community/like", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ postId, uid: user.uid })
       });
-      if (!response.ok) throw new Error("Failed to like post");
+      if (!response.ok) {
+        // Revert on failure
+        setUserLikes(prev => ({ ...prev, [postId]: isLiked }));
+        throw new Error("Failed to like post");
+      }
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -183,9 +210,14 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
                 <div className="flex items-center gap-4 md:gap-6 border-t border-white/5 pt-4 md:pt-6">
                   <button
                     onClick={() => handleLike(post.id)}
-                    className="flex items-center gap-2 text-white/40 hover:text-red-400 transition-colors group/btn shrink-0"
+                    className={`flex items-center gap-2 transition-colors group/btn shrink-0 ${
+                      userLikes[post.id] ? "text-red-500" : "text-white/40 hover:text-red-400"
+                    }`}
                   >
-                    <Heart size={18} className="md:w-5 md:h-5 group-hover/btn:fill-red-400" />
+                    <Heart 
+                      size={18} 
+                      className={`md:w-5 md:h-5 ${userLikes[post.id] ? "fill-red-500" : "group-hover/btn:fill-red-400"}`} 
+                    />
                     <span className="text-xs md:text-sm font-bold">{post.likesCount || 0}</span>
                   </button>
                   <button 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
 import { motion } from "motion/react";
-import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
+import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { Bell, CheckCircle2, Info, AlertCircle } from "lucide-react";
@@ -108,7 +108,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     try {
       const keypair = deriveSuiWallet(user.uid);
       let coinType = USDT_TYPE;
-      if (sendParams.asset === "SUI") coinType = "0x2::sui::SUI";
+      if (sendParams.asset === "SUI") coinType = SUI_TYPE;
       if (sendParams.asset === "USDC") coinType = USDC_TYPE;
 
       const result = await crossChainTransfer({

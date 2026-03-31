@@ -13,6 +13,10 @@ export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS ||
 export const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad::coin::COIN";
 // USDC on Sui Testnet (Common ID)
 export const USDC_TYPE = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC";
+export const SUI_TYPE = "0x2::sui::SUI";
+
+// Platform Fee Configuration
+export const PLATFORM_FEE_PERCENT = 0.001; // 0.1% - "cheap" but collected
 
 /**
  * Simplified zkLogin wallet derivation for the AI Studio environment.
@@ -93,21 +97,23 @@ export async function getAllBalances(address: string) {
   return { sui, usdt, usdc };
 }
 
-export const SUI_TYPE = "0x2::sui::SUI";
+export const SUI_TYPE_ALT = "0x2::sui::SUI";
 
 export async function getDecimals(coinType: string): Promise<number> {
-  if (coinType === SUI_TYPE || coinType.includes("sui::SUI")) return 9;
+  if (coinType === SUI_TYPE || coinType === SUI_TYPE_ALT || coinType.includes("sui::SUI")) return 9;
   try {
     const metadata = await suiClient.getCoinMetadata({ coinType });
     return metadata?.decimals ?? 6;
   } catch (e) {
     console.error("Error fetching coin metadata:", e);
-    return 6; // Default to 6 for USDT/USDC if fetch fails
+    // Common defaults
+    if (coinType === USDT_TYPE || coinType === USDC_TYPE) return 6;
+    return 9; 
   }
 }
 
 /**
- * Real on-chain transfer for USDT or SUI
+ * Real on-chain transfer for USDT or SUI with platform fee collection
  */
 export async function transferOnChain(params: {
   signer: Ed25519Keypair;
@@ -118,14 +124,25 @@ export async function transferOnChain(params: {
   const { signer, to, amount, coinType = SUI_TYPE } = params;
   const txb = new Transaction();
   const decimals = await getDecimals(coinType);
-  const rawAmount = Math.floor(amount * Math.pow(10, decimals));
+  
+  // Calculate platform fee
+  const feePercent = to === SUI_TREASURY_ADDRESS ? 0 : PLATFORM_FEE_PERCENT;
+  const feeAmount = amount * feePercent;
+  const netAmount = amount - feeAmount;
 
-  if (rawAmount <= 0) throw new Error("Amount must be greater than 0");
+  const rawNetAmount = Math.floor(netAmount * Math.pow(10, decimals));
+  const rawFeeAmount = Math.floor(feeAmount * Math.pow(10, decimals));
 
-  if (coinType === SUI_TYPE || coinType.includes("sui::SUI")) {
+  if (rawNetAmount <= 0) throw new Error("Amount too small after fees");
+
+  if (coinType === SUI_TYPE || coinType === SUI_TYPE_ALT || coinType.includes("sui::SUI")) {
     // SUI Transfer
-    const [coin] = txb.splitCoins(txb.gas, [rawAmount]);
-    txb.transferObjects([coin], to);
+    if (rawFeeAmount > 0) {
+      const [feeCoin] = txb.splitCoins(txb.gas, [rawFeeAmount]);
+      txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+    }
+    const [mainCoin] = txb.splitCoins(txb.gas, [rawNetAmount]);
+    txb.transferObjects([mainCoin], to);
   } else {
     // Token Transfer (e.g. USDT)
     const coins = await suiClient.getCoins({
@@ -135,9 +152,10 @@ export async function transferOnChain(params: {
 
     if (coins.data.length === 0) throw new Error(`No coins found for type: ${coinType}`);
 
-    // Calculate total balance to ensure we have enough
     const totalBalance = coins.data.reduce((sum, c) => sum + BigInt(c.balance), BigInt(0));
-    if (totalBalance < BigInt(rawAmount)) {
+    const totalNeeded = BigInt(rawNetAmount) + BigInt(rawFeeAmount);
+    
+    if (totalBalance < totalNeeded) {
       throw new Error(`Insufficient balance. Have ${Number(totalBalance) / Math.pow(10, decimals)}, need ${amount}`);
     }
 
@@ -149,18 +167,24 @@ export async function transferOnChain(params: {
       txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
     }
 
-    const [coin] = txb.splitCoins(txb.object(primaryCoin), [rawAmount]);
-    txb.transferObjects([coin], to);
+    if (rawFeeAmount > 0) {
+      const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
+      txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+    }
+    
+    const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
+    txb.transferObjects([mainCoin], to);
   }
+
+  // Set a reasonable gas budget
+  txb.setGasBudget(10000000); // 0.01 SUI
 
   const result = await suiClient.signAndExecuteTransaction({
     signer,
     transaction: txb,
   });
 
-  // Wait for effects to be sure it's processed
   await suiClient.waitForTransaction({ digest: result.digest });
-
   return result;
 }
 
