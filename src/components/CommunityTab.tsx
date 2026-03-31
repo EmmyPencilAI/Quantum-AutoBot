@@ -9,14 +9,15 @@ interface CommunityTabProps {
   user: any;
 }
 
-const timeAgo = (date: string | number | Date) => {
+const formatDateTime = (date: string | number | Date) => {
   const past = new Date(date);
   return past.toLocaleString(undefined, { 
     month: 'short', 
     day: 'numeric', 
     year: 'numeric', 
     hour: '2-digit', 
-    minute: '2-digit' 
+    minute: '2-digit',
+    second: '2-digit'
   });
 };
 
@@ -169,7 +170,7 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
                         {post.authorName}
                       </p>
                       <p className="text-[10px] md:text-xs text-white/40 truncate">
-                        {timeAgo(post.createdAt)}
+                        {formatDateTime(post.createdAt)}
                       </p>
                     </div>
                   </div>
@@ -336,7 +337,7 @@ const CommentsList: React.FC<{ postId: string }> = ({ postId }) => {
           <div className="bg-white/5 rounded-xl p-2 flex-1">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] font-bold text-orange-500">{comment.authorName}</span>
-              <span className="text-[8px] text-white/20">{timeAgo(comment.createdAt)}</span>
+              <span className="text-[8px] text-white/20">{formatDateTime(comment.createdAt)}</span>
             </div>
             <p className="text-[11px] text-white/80">{comment.content}</p>
           </div>

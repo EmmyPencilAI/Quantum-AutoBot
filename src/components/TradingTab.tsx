@@ -77,11 +77,37 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       console.error("Error fetching trade history:", error);
     });
 
+    // Global activity feed
+    const globalQ = query(
+      collection(db, "trades"),
+      orderBy("timestamp", "desc"),
+      limit(200)
+    );
+
+    const unsubscribeGlobal = onSnapshot(globalQ, (snapshot) => {
+      const trades = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        time: new Date(doc.data().timestamp).toLocaleString(undefined, { 
+          month: 'short', 
+          day: 'numeric', 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }),
+      }));
+      setGlobalActivity(trades);
+    }, (error) => {
+      console.error("Error fetching global trade history:", error);
+    });
+
     return () => {
       unsubscribeUser();
       unsubscribeTrades();
+      unsubscribeGlobal();
     };
   }, [user]);
+
+  const [globalActivity, setGlobalActivity] = useState<any[]>([]);
 
   const toggleTrading = async () => {
     if (!user) return;
@@ -459,17 +485,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-2xl">
             <div className="flex items-center justify-between mb-4 md:mb-6">
               <h3 className="text-base md:text-xl font-bold tracking-tight flex items-center gap-2">
-                <BarChart2 size={18} className="text-orange-500 md:w-5 md:h-5" />
-                <span>Trade Activity Feed</span>
+                <Activity size={18} className="text-orange-500 md:w-5 md:h-5" />
+                <span>Global Activity Feed</span>
               </h3>
               <div className="text-[9px] md:text-xs text-white/40 bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10">
                 Live Updates
               </div>
             </div>
-            <div className="space-y-3 md:space-y-4 max-h-48 md:max-h-64 overflow-y-auto pr-2 scrollbar-hide">
+            <div className="space-y-3 md:space-y-4 max-h-[400px] md:max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
               <AnimatePresence>
-                {history.length > 0 && history[0].time !== "Start" ? (
-                  history.slice().reverse().map((trade: any) => (
+                {globalActivity.length > 0 ? (
+                  globalActivity.map((trade: any) => (
                     <motion.div
                       key={trade.id}
                       initial={{ opacity: 0, x: -10 }}
@@ -477,8 +503,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       className="flex items-center justify-between p-3 md:p-4 bg-white/5 rounded-xl md:rounded-2xl border border-white/5"
                     >
                       <div className="flex items-center gap-3 md:gap-4">
-                        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center font-bold text-[10px] md:text-xs ${trade.type === "Buy" ? "bg-green-400/10 text-green-400" : "bg-red-400/10 text-red-400"}`}>
-                          {trade.type === "Buy" ? "BUY" : "SELL"}
+                        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center font-bold text-[10px] md:text-xs ${trade.type === "Buy" || trade.type === "BUY" ? "bg-green-400/10 text-green-400" : "bg-red-400/10 text-red-400"}`}>
+                          {trade.type === "Buy" || trade.type === "BUY" ? "BUY" : "SELL"}
                         </div>
                         <div className="min-w-0">
                           <p className="font-bold text-xs md:text-base truncate">{trade.pair}</p>
@@ -498,8 +524,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                 ) : (
                   <div className="flex flex-col items-center justify-center py-8 md:py-10 text-white/20">
                     <TrendingUp size={32} className="mb-3 md:mb-4 opacity-10 md:w-12 md:h-12" />
-                    <p className="font-bold text-sm md:text-base">No active trades</p>
-                    <p className="text-[10px] md:text-xs">Start the engine to begin trading</p>
+                    <p className="text-xs md:text-sm font-bold uppercase tracking-widest">Waiting for trades...</p>
                   </div>
                 )}
               </AnimatePresence>
