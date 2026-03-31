@@ -7,7 +7,7 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 export const suiClient = new SuiClient({ url: getFullnodeUrl("testnet"), network: "testnet" });
 
 export const SUI_CONTRACT_ADDRESS = import.meta.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
-export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS || "0xe7768fa3f1907ddfd5bda7d7760e637b9d5a4887fa3f94482bc20a11e37db472";
+export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS || "0x40e4e861562d786bbdc68e2ace97b579a6022e8a1d9bad850112138c301e0e41";
 
 // USDT on Sui Testnet
 export const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad::coin::COIN";
