@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { MessageSquare, Heart, Share2, Plus, Send, MoreHorizontal, UserPlus, TrendingUp, Search, ChevronDown, ChevronUp } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { db, handleFirestoreError, OperationType } from "../firebase";
@@ -24,6 +24,7 @@ const formatDateTime = (date: string | number | Date) => {
 const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
   const [posts, setPosts] = useState<any[]>([]);
   const [userLikes, setUserLikes] = useState<Record<string, boolean>>({});
+  const likeListenersRef = useRef<Record<string, () => void>>({});
   const [newPost, setNewPost] = useState("");
   const [loading, setLoading] = useState(false);
   const [commentingOn, setCommentingOn] = useState<string | null>(null);
@@ -43,20 +44,31 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
   }, []);
 
   useEffect(() => {
-    if (!user || posts.length === 0) return;
-    
-    const unsubscribes: (() => void)[] = [];
+    if (!user) {
+      (Object.values(likeListenersRef.current) as (() => void)[]).forEach(unsub => unsub());
+      likeListenersRef.current = {};
+      setUserLikes({});
+      return;
+    }
     
     posts.forEach(post => {
-      const likeRef = doc(db, "posts", post.id, "likes", user.uid);
-      const unsub = onSnapshot(likeRef, (likeDoc) => {
-        setUserLikes(prev => ({ ...prev, [post.id]: likeDoc.exists() }));
-      });
-      unsubscribes.push(unsub);
+      if (!likeListenersRef.current[post.id]) {
+        const likeRef = doc(db, "posts", post.id, "likes", user.uid);
+        const unsub = onSnapshot(likeRef, (likeDoc) => {
+          setUserLikes(prev => ({ ...prev, [post.id]: likeDoc.exists() }));
+        }, (error) => {
+          console.error(`Error listening to likes for post ${post.id}:`, error);
+        });
+        likeListenersRef.current[post.id] = unsub;
+      }
     });
-    
-    return () => unsubscribes.forEach(unsub => unsub());
-  }, [user, posts.map(p => p.id).join(",")]);
+  }, [user, posts]);
+
+  useEffect(() => {
+    return () => {
+      (Object.values(likeListenersRef.current) as (() => void)[]).forEach(unsub => unsub());
+    };
+  }, []);
 
   const handleCreatePost = async () => {
     if (!newPost.trim() || !user) return;
@@ -82,7 +94,10 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
   };
 
   const handleLike = async (postId: string) => {
-    if (!user) return;
+    if (!user) {
+      toast.error("Please log in to like posts");
+      return;
+    }
     
     // Optimistic update
     const isLiked = userLikes[postId];
@@ -94,12 +109,15 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ postId, uid: user.uid })
       });
+      
+      const data = await response.json();
       if (!response.ok) {
         // Revert on failure
         setUserLikes(prev => ({ ...prev, [postId]: isLiked }));
-        throw new Error("Failed to like post");
+        throw new Error(data.error || "Failed to like post");
       }
     } catch (e: any) {
+      console.error("Like error:", e);
       toast.error(e.message);
     }
   };
@@ -119,11 +137,17 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
           content: commentText
         })
       });
-      if (!response.ok) throw new Error("Failed to post comment");
+      
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to post comment");
+      }
+      
       setCommentText("");
       setCommentingOn(null);
       toast.success("Comment added!");
     } catch (e: any) {
+      console.error("Comment error:", e);
       toast.error(e.message);
     } finally {
       setLoading(false);
@@ -350,6 +374,9 @@ const CommentsList: React.FC<{ postId: string }> = ({ postId }) => {
     const q = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      console.error(`Error listening to comments for post ${postId}:`, error);
+      // We don't throw here to avoid crashing the UI, just log it
     });
     return () => unsubscribe();
   }, [postId]);

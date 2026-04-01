@@ -13,6 +13,7 @@ import CommunityTab from "./components/CommunityTab";
 import SettingsTab from "./components/SettingsTab";
 import { deriveSuiWallet } from "./lib/sui";
 
+import ErrorBoundary from "./components/ErrorBoundary";
 import { Toaster } from "sonner";
 
 const App: React.FC = () => {
@@ -123,9 +124,10 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white font-sans selection:bg-orange-500/30">
-      <Toaster position="top-center" expand={true} richColors />
-      {!user ? (
+    <ErrorBoundary>
+      <div className="min-h-screen bg-black text-white font-sans selection:bg-orange-500/30">
+        <Toaster position="top-center" expand={true} richColors />
+        {!user ? (
         <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-4 md:p-6 font-sans relative overflow-hidden">
           {/* Background Accents */}
           <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
@@ -195,12 +197,13 @@ const App: React.FC = () => {
           {activeTab === 0 && <WalletTab user={user} />}
           {activeTab === 1 && <MarketsTab />}
           {activeTab === 2 && <TradingTab user={user} />}
-          {activeTab === 3 && <LeaderboardTab />}
+          {activeTab === 3 && <LeaderboardTab user={user} />}
           {activeTab === 4 && <CommunityTab user={user} />}
           {activeTab === 5 && <SettingsTab user={user} />}
         </Layout>
       )}
     </div>
+    </ErrorBoundary>
   );
 };
 

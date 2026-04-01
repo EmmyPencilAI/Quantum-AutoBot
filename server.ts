@@ -592,6 +592,7 @@ async function startServer() {
 
   // Community Comments
   app.post("/api/community/comment", async (req, res) => {
+    console.log("POST /api/community/comment", req.body);
     if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
     try {
       const { postId, uid, authorName, authorAvatar, content } = req.body;
@@ -603,6 +604,7 @@ async function startServer() {
       const postRef = db.collection("posts").doc(postId);
       const postDoc = await postRef.get();
       if (!postDoc.exists) {
+        console.error(`Post not found: ${postId}`);
         return res.status(404).json({ success: false, error: "Post not found" });
       }
 
@@ -619,14 +621,16 @@ async function startServer() {
         commentsCount: admin.firestore.FieldValue.increment(1)
       });
 
+      console.log(`Comment added to post ${postId} by user ${uid}`);
       res.json({ success: true, comment });
     } catch (error: any) {
       console.error("Comment error:", error);
-      res.status(500).json({ success: false, error: error.message });
+      res.status(500).json({ success: false, error: error.message || "Internal server error" });
     }
   });
 
   app.post("/api/community/like", async (req, res) => {
+    console.log("POST /api/community/like", req.body);
     if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
     try {
       const { postId, uid } = req.body;
@@ -637,6 +641,7 @@ async function startServer() {
       const postRef = db.collection("posts").doc(postId);
       const postDoc = await postRef.get();
       if (!postDoc.exists) {
+        console.error(`Post not found: ${postId}`);
         return res.status(404).json({ success: false, error: "Post not found" });
       }
 
@@ -649,6 +654,7 @@ async function startServer() {
         await postRef.update({
           likesCount: admin.firestore.FieldValue.increment(-1)
         });
+        console.log(`User ${uid} unliked post ${postId}`);
         return res.json({ success: true, liked: false });
       } else {
         // Like
@@ -656,11 +662,12 @@ async function startServer() {
         await postRef.update({
           likesCount: admin.firestore.FieldValue.increment(1)
         });
+        console.log(`User ${uid} liked post ${postId}`);
         return res.json({ success: true, liked: true });
       }
     } catch (error: any) {
       console.error("Like error:", error);
-      res.status(500).json({ success: false, error: error.message });
+      res.status(500).json({ success: false, error: error.message || "Internal server error" });
     }
   });
 
