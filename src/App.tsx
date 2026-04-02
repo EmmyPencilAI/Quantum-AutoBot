@@ -54,7 +54,7 @@ const App: React.FC = () => {
               const keypair = deriveSuiWallet(user.uid);
               await setDoc(userRef, {
                 uid: user.uid,
-                username: user.displayName || "Quantum Trader",
+                displayName: user.displayName || "Quantum Trader",
                 avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
                 suiWallet: keypair.toSuiAddress(),
                 suiBalance: 0,

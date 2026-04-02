@@ -47,7 +47,7 @@ service cloud.firestore {
       return data.keys().hasAll(['authorUid', 'content', 'createdAt']) &&
              data.authorUid is string &&
              data.content is string && data.content.size() > 0 && data.content.size() < 2000 &&
-             data.createdAt is string &&
+             (data.createdAt is string || data.createdAt is timestamp) &&
              (data.authorName is string || !('authorName' in data)) &&
              (data.authorAvatar is string || !('authorAvatar' in data)) &&
              (data.likesCount is number || !('likesCount' in data)) &&
@@ -58,7 +58,7 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'content', 'createdAt']) &&
              data.uid is string &&
              data.content is string && data.content.size() > 0 && data.content.size() < 1000 &&
-             data.createdAt is string;
+             (data.createdAt is string || data.createdAt is timestamp);
     }
 
     function isValidTrade(data) {
@@ -68,7 +68,7 @@ service cloud.firestore {
              data.type in ['Buy', 'Sell'] &&
              data.amount is number && data.amount >= 0 &&
              data.price is number && data.price >= 0 &&
-             data.timestamp is string;
+             (data.timestamp is string || data.timestamp is timestamp);
     }
 
     function isValidNotification(data) {
@@ -76,7 +76,7 @@ service cloud.firestore {
              data.uid is string &&
              data.title is string && data.title.size() > 0 &&
              data.message is string && data.message.size() > 0 &&
-             data.createdAt is string;
+             (data.createdAt is string || data.createdAt is timestamp);
     }
 
     // ===============================================================
@@ -98,7 +98,8 @@ service cloud.firestore {
         (request.auth.uid == resource.data.authorUid || isAdmin()) ||
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'commentsCount']) && 
          (math.abs(request.resource.data.likesCount - resource.data.likesCount) == 1 || 
-          request.resource.data.commentsCount == resource.data.commentsCount + 1))
+          request.resource.data.commentsCount == resource.data.commentsCount + 1 ||
+          math.abs(request.resource.data.commentsCount - resource.data.commentsCount) == 1))
       );
       allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorUid || isAdmin());
 

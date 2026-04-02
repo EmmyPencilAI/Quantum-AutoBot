@@ -2,23 +2,28 @@ import React, { useState, useEffect, useRef } from "react";
 import { MessageSquare, Heart, Share2, Plus, Send, MoreHorizontal, UserPlus, TrendingUp, Search, ChevronDown, ChevronUp } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { db, handleFirestoreError, OperationType } from "../firebase";
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, increment, limit } from "firebase/firestore";
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, increment, limit, setDoc, deleteDoc } from "firebase/firestore";
 import { toast } from "sonner";
 
 interface CommunityTabProps {
   user: any;
 }
 
-const formatDateTime = (date: string | number | Date) => {
-  const past = new Date(date);
-  return past.toLocaleString(undefined, { 
-    month: 'short', 
-    day: 'numeric', 
-    year: 'numeric', 
-    hour: '2-digit', 
-    minute: '2-digit',
-    second: '2-digit'
-  });
+const formatDateTime = (date: any) => {
+  if (!date) return "";
+  try {
+    const d = date.toDate ? date.toDate() : new Date(date);
+    return d.toLocaleString(undefined, { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  } catch (e) {
+    return "";
+  }
 };
 
 const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
@@ -82,7 +87,7 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
         content: newPost,
         likesCount: 0,
         commentsCount: 0,
-        createdAt: new Date().toISOString(),
+        createdAt: serverTimestamp(),
       });
       setNewPost("");
       toast.success("Post shared with the community!");
@@ -99,56 +104,59 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
       return;
     }
     
-    // Optimistic update
     const isLiked = userLikes[postId];
-    setUserLikes(prev => ({ ...prev, [postId]: !isLiked }));
+    const postRef = doc(db, "posts", postId);
+    const likeRef = doc(db, "posts", postId, "likes", user.uid);
     
     try {
-      const response = await fetch("/api/community/like", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ postId, uid: user.uid })
-      });
-      
-      const data = await response.json();
-      if (!response.ok) {
-        // Revert on failure
-        setUserLikes(prev => ({ ...prev, [postId]: isLiked }));
-        throw new Error(data.error || "Failed to like post");
+      if (isLiked) {
+        // Unlike
+        await deleteDoc(likeRef);
+        await updateDoc(postRef, {
+          likesCount: increment(-1)
+        });
+      } else {
+        // Like
+        await setDoc(likeRef, {
+          uid: user.uid,
+          createdAt: serverTimestamp()
+        });
+        await updateDoc(postRef, {
+          likesCount: increment(1)
+        });
       }
     } catch (e: any) {
       console.error("Like error:", e);
-      toast.error(e.message);
+      handleFirestoreError(e, OperationType.UPDATE, `posts/${postId}/likes/${user.uid}`);
     }
   };
 
   const handleComment = async (postId: string) => {
     if (!commentText.trim() || !user) return;
     setLoading(true);
+    
+    const postRef = doc(db, "posts", postId);
+    const commentsRef = collection(db, "posts", postId, "comments");
+
     try {
-      const response = await fetch("/api/community/comment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          postId,
-          uid: user.uid,
-          authorName: user.displayName || "Quantum Trader",
-          authorAvatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-          content: commentText
-        })
+      await addDoc(commentsRef, {
+        uid: user.uid,
+        authorName: user.displayName || "Quantum Trader",
+        authorAvatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+        content: commentText,
+        createdAt: serverTimestamp()
       });
-      
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to post comment");
-      }
+
+      await updateDoc(postRef, {
+        commentsCount: increment(1)
+      });
       
       setCommentText("");
       setCommentingOn(null);
       toast.success("Comment added!");
     } catch (e: any) {
       console.error("Comment error:", e);
-      toast.error(e.message);
+      handleFirestoreError(e, OperationType.CREATE, `posts/${postId}/comments`);
     } finally {
       setLoading(false);
     }

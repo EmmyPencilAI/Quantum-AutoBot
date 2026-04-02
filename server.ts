@@ -147,6 +147,7 @@ async function postBotMessage() {
       authorWallet: "0x0000000000000000000000000000000000000000",
       content: message,
       likesCount: Math.floor(Math.random() * 10),
+      commentsCount: 0,
       createdAt: new Date().toISOString()
     };
     
@@ -251,6 +252,7 @@ async function processBackgroundTrades() {
             authorWallet: "0x0000000000000000000000000000000000000000",
             content: tradeMsg,
             likesCount: 0,
+            commentsCount: 0,
             createdAt: now
           });
         }
