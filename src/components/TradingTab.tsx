@@ -4,7 +4,9 @@ import { motion, AnimatePresence } from "motion/react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
-import { deriveSuiWallet, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
+import { deriveSuiWallet, transferOnChain, startSessionOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
+
+import { toast } from "sonner";
 
 interface TradingTabProps {
   user: any;
@@ -18,7 +20,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [initialInvestment, setInitialInvestment] = useState(0);
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fundAmount, setFundAmount] = useState("100");
+  const [fundAmount, setFundAmount] = useState("0");
   const [walletBalance, setWalletBalance] = useState(0);
   const [tradingAsset, setTradingAsset] = useState("USDT");
 
@@ -41,20 +43,25 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
     });
 
-    // Fetch trade history for chart
+    // Fetch trade history for chart and activity feed
     const tradesRef = collection(db, "trades");
     const q = query(
       tradesRef,
       where("uid", "==", user.uid),
       orderBy("timestamp", "desc"),
-      limit(100)
+      limit(200)
     );
 
     const unsubscribeTrades = onSnapshot(q, (snapshot) => {
       const trades = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        time: new Date(doc.data().timestamp).toLocaleTimeString(),
+        time: new Date(doc.data().timestamp).toLocaleString(undefined, { 
+          month: 'short', 
+          day: 'numeric', 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }),
         value: doc.data().pnl
       })).reverse();
       
@@ -70,11 +77,37 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       console.error("Error fetching trade history:", error);
     });
 
+    // Global activity feed
+    const globalQ = query(
+      collection(db, "trades"),
+      orderBy("timestamp", "desc"),
+      limit(200)
+    );
+
+    const unsubscribeGlobal = onSnapshot(globalQ, (snapshot) => {
+      const trades = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        time: new Date(doc.data().timestamp).toLocaleString(undefined, { 
+          month: 'short', 
+          day: 'numeric', 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }),
+      }));
+      setGlobalActivity(trades);
+    }, (error) => {
+      console.error("Error fetching global trade history:", error);
+    });
+
     return () => {
       unsubscribeUser();
       unsubscribeTrades();
+      unsubscribeGlobal();
     };
   }, [user]);
+
+  const [globalActivity, setGlobalActivity] = useState<any[]>([]);
 
   const toggleTrading = async () => {
     if (!user) return;
@@ -84,21 +117,35 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       
       if (isTrading) {
         // Settlement logic
+        toast.loading("Settling trades on-chain...", { id: "settle" });
+        const address = deriveSuiWallet(user.uid).toSuiAddress();
         const response = await fetch("/api/trading/settle", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uid: user.uid })
+          body: JSON.stringify({ uid: user.uid, walletAddress: address })
         });
-        const result = await response.json();
+        if (!response.ok) {
+        const text = await response.text();
+        console.error("Settlement API error:", text);
+        try {
+          const errorData = JSON.parse(text);
+          throw new Error(errorData.error || `Server error: ${response.status}`);
+        } catch (e) {
+          throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
+        }
+      }
+
+      const result = await response.json();
         if (result.success) {
           console.log("Settlement successful:", result);
+          toast.success("Settlement successful! Funds returned to wallet.", { id: "settle" });
         } else {
           throw new Error(result.error || "Settlement failed");
         }
       } else {
         // Start trading
         if (initialInvestment <= 0) {
-          alert("Please fund your trading account first.");
+          toast.error("Please fund your trading account first.");
           setLoading(false);
           return;
         }
@@ -107,9 +154,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           activeStrategy: strategy,
           activePair: selectedPair
         });
+        toast.success("Trading engine started!");
       }
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    } catch (e: any) {
+      console.error("Trading toggle failed:", e);
+      toast.error("Action failed: " + (e.message || "Unknown error"), { id: "settle" });
     } finally {
       setLoading(false);
     }
@@ -118,61 +167,93 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const fundTrading = async () => {
     if (!user || isTrading) return;
     const amount = parseFloat(fundAmount);
-    if (isNaN(amount) || amount <= 0) return;
+    if (isNaN(amount) || amount <= 0) {
+      toast.error("Please enter a valid amount to fund.");
+      return;
+    }
 
     setLoading(true);
+    toast.loading("Processing funding...", { id: "fund" });
     try {
-      const address = deriveSuiWallet(user.uid).toSuiAddress();
-      const balances = await getAllBalances(address);
-      const currentOnChainBalance = tradingAsset === "USDC" ? balances.usdc : balances.usdt;
-      const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+      if (amount <= walletBalance) {
+        // 1. Fund from internal wallet (Firestore only)
+        console.log(`Funding ${amount} from internal wallet...`);
+        const userRef = doc(db, "users", user.uid);
+        const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+        await updateDoc(userRef, {
+          isTrading: true,
+          initialInvestment: amount,
+          [balanceField]: amount,
+          walletBalance: walletBalance - amount,
+          tradingAsset: tradingAsset,
+          activeStrategy: strategy,
+          activePair: selectedPair,
+          totalProfit: 0
+        });
 
-      if (amount > currentOnChainBalance) {
-        alert(`Insufficient on-chain ${tradingAsset} balance. Please receive funds first.`);
-        setLoading(false);
-        return;
+        toast.success(`Successfully funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
+      } else {
+        // 2. Fund from on-chain (requires transfer to treasury or contract)
+        const address = deriveSuiWallet(user.uid).toSuiAddress();
+        const balances = await getAllBalances(address);
+        
+        let currentOnChainBalance = 0;
+        if (tradingAsset === "SUI") currentOnChainBalance = balances.sui;
+        else if (tradingAsset === "USDC") currentOnChainBalance = balances.usdc;
+        else currentOnChainBalance = balances.usdt;
+
+        if (amount > currentOnChainBalance) {
+          toast.error(`Insufficient balance. You have ${walletBalance.toFixed(2)} in internal wallet and ${currentOnChainBalance.toFixed(2)} on-chain.`, { id: "fund" });
+          setLoading(false);
+          return;
+        }
+
+        if (balances.sui < 0.01) {
+          toast.error("Insufficient SUI for gas. Please receive some SUI first.", { id: "fund" });
+          setLoading(false);
+          return;
+        }
+
+        console.log(`Funding ${amount} from on-chain...`);
+        const keypair = deriveSuiWallet(user.uid);
+        let sessionId = null;
+
+        if (tradingAsset === "SUI") {
+          // Call Move contract for SUI funding
+          sessionId = await startSessionOnChain({
+            signer: keypair,
+            amount: amount,
+          });
+        } else {
+          // Transfer USDT/USDC to treasury
+          const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+          await transferOnChain({
+            signer: keypair,
+            to: SUI_TREASURY_ADDRESS,
+            amount: amount,
+            coinType: coinType
+          });
+        }
+
+        const userRef = doc(db, "users", user.uid);
+        const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+        await updateDoc(userRef, {
+          isTrading: true,
+          initialInvestment: amount,
+          [balanceField]: amount,
+          tradingAsset: tradingAsset,
+          activeStrategy: strategy,
+          activePair: selectedPair,
+          totalProfit: 0,
+          tradingSessionId: sessionId // Store the session ID if it exists
+        });
+
+        toast.success(`Successfully funded ${amount} ${tradingAsset} from on-chain!`, { id: "fund" });
       }
-
-      if (balances.sui < 0.01) {
-        alert("Insufficient SUI for gas. Please receive some SUI first.");
-        setLoading(false);
-        return;
-      }
-
-      // 1. Perform on-chain transfer to Treasury
-      const keypair = deriveSuiWallet(user.uid);
-      await transferOnChain({
-        signer: keypair,
-        to: SUI_TREASURY_ADDRESS,
-        amount: amount,
-        coinType: coinType
-      });
-
-      // 2. Update Firestore
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        isTrading: true,
-        initialInvestment: amount,
-        tradingAsset: tradingAsset,
-        activeStrategy: strategy,
-        activePair: selectedPair,
-        totalProfit: 0 // Reset profit for new session
-      });
-
-      // Add notification
-      await setDoc(doc(collection(db, "notifications")), {
-        uid: user.uid,
-        type: "TRADE_STARTED",
-        title: "Trading Funded On-chain",
-        message: `Successfully funded ${amount.toFixed(2)} ${tradingAsset} from your on-chain wallet. Trading started.`,
-        timestamp: new Date().toISOString(),
-        read: false
-      });
-
-      setFundAmount("100");
+      setFundAmount("0");
     } catch (e: any) {
       console.error("Funding failed:", e);
-      alert("Funding failed: " + (e.message || "Unknown error"));
+      toast.error("Funding failed: " + (e.message || "Unknown error"), { id: "fund" });
     } finally {
       setLoading(false);
     }
@@ -186,8 +267,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       await updateDoc(userRef, {
         activeStrategy: newStrategy
       });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    } catch (e: any) {
+      console.error("Strategy change failed:", e);
+      alert("Strategy change failed: " + (e.message || "Unknown error"));
     }
   };
 
@@ -199,8 +281,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       await updateDoc(userRef, {
         activePair: newPair
       });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+    } catch (e: any) {
+      console.error("Pair change failed:", e);
+      alert("Pair change failed: " + (e.message || "Unknown error"));
     }
   };
 
@@ -225,18 +308,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   ];
 
   useEffect(() => {
-    let interval: any;
-    if (isTrading) {
-      interval = setInterval(() => {
-        const change = (Math.random() - 0.45) * 5; // Slight upward bias
-        setPnl((prev) => prev + change);
-        setHistory((prev) => [...prev.slice(-19), { time: new Date().toLocaleTimeString(), value: pnl + change }]);
-      }, 2000);
-    } else {
-      clearInterval(interval);
-    }
-    return () => clearInterval(interval);
-  }, [isTrading, pnl]);
+    // The background trading engine in server.ts handles trade generation
+    // We just listen to Firestore updates for real-time data
+    return () => {};
+  }, [isTrading]);
 
   const activePairData = tradingPairs.find(p => p.symbol === selectedPair) || tradingPairs[0];
 
@@ -268,7 +343,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Fund Trading Account</h3>
           
           <div className="flex gap-2 mb-2">
-            {["USDT", "USDC"].map((asset) => (
+            {["SUI", "USDT", "USDC"].map((asset) => (
               <button
                 key={asset}
                 onClick={() => setTradingAsset(asset)}
@@ -305,7 +380,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             Wallet Balance: <span className="text-blue-400 font-bold">{walletBalance.toFixed(2)} USD</span>
           </p>
           <p className="text-[10px] text-white/40">
-            Trading Balance: <span className="text-green-400 font-bold">{initialInvestment.toFixed(2)} {tradingAsset}</span>
+            Trading Balance: <span className="text-green-400 font-bold">{(initialInvestment + pnl).toFixed(2)} {tradingAsset}</span>
           </p>
         </div>
 
@@ -430,17 +505,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-2xl">
             <div className="flex items-center justify-between mb-4 md:mb-6">
               <h3 className="text-base md:text-xl font-bold tracking-tight flex items-center gap-2">
-                <BarChart2 size={18} className="text-orange-500 md:w-5 md:h-5" />
-                <span>Trade Activity Feed</span>
+                <Activity size={18} className="text-orange-500 md:w-5 md:h-5" />
+                <span>Global Activity Feed</span>
               </h3>
               <div className="text-[9px] md:text-xs text-white/40 bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10">
                 Live Updates
               </div>
             </div>
-            <div className="space-y-3 md:space-y-4 max-h-48 md:max-h-64 overflow-y-auto pr-2 scrollbar-hide">
+            <div className="space-y-3 md:space-y-4 max-h-[400px] md:max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
               <AnimatePresence>
-                {history.length > 0 && history[0].time !== "Start" ? (
-                  history.slice().reverse().map((trade: any) => (
+                {globalActivity.length > 0 ? (
+                  globalActivity.map((trade: any) => (
                     <motion.div
                       key={trade.id}
                       initial={{ opacity: 0, x: -10 }}
@@ -448,8 +523,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       className="flex items-center justify-between p-3 md:p-4 bg-white/5 rounded-xl md:rounded-2xl border border-white/5"
                     >
                       <div className="flex items-center gap-3 md:gap-4">
-                        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center font-bold text-[10px] md:text-xs ${trade.type === "Buy" ? "bg-green-400/10 text-green-400" : "bg-red-400/10 text-red-400"}`}>
-                          {trade.type === "Buy" ? "BUY" : "SELL"}
+                        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center font-bold text-[10px] md:text-xs ${trade.type === "Buy" || trade.type === "BUY" ? "bg-green-400/10 text-green-400" : "bg-red-400/10 text-red-400"}`}>
+                          {trade.type === "Buy" || trade.type === "BUY" ? "BUY" : "SELL"}
                         </div>
                         <div className="min-w-0">
                           <p className="font-bold text-xs md:text-base truncate">{trade.pair}</p>
@@ -469,8 +544,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                 ) : (
                   <div className="flex flex-col items-center justify-center py-8 md:py-10 text-white/20">
                     <TrendingUp size={32} className="mb-3 md:mb-4 opacity-10 md:w-12 md:h-12" />
-                    <p className="font-bold text-sm md:text-base">No active trades</p>
-                    <p className="text-[10px] md:text-xs">Start the engine to begin trading</p>
+                    <p className="text-xs md:text-sm font-bold uppercase tracking-widest">Waiting for trades...</p>
                   </div>
                 )}
               </AnimatePresence>
