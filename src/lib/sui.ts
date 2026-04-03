@@ -1,5 +1,4 @@
-import { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
-import { getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
@@ -188,20 +187,49 @@ export async function transferOnChain(params: {
   return result;
 }
 
-// Settlement logic: Shares profit between user and treasury
-export async function settleTradeOnChain(params: {
-  userAddress: string;
-  principal: number;
-  profit: number;
-}) {
-  console.log(`Settling trade on-chain for ${params.userAddress}...`, params);
-  // In a real implementation:
-  // 1. Call Move contract function `settle_trade(principal, profit, treasury_addr)`
-  // 2. Contract handles the 50/50 split and transfers
-  return new Promise((resolve) => setTimeout(() => resolve({ 
-    success: true, 
-    txId: "0x" + Math.random().toString(16).slice(2) 
-  }), 2000));
+export async function startSessionOnChain({
+  signer,
+  amount,
+}: {
+  signer: Ed25519Keypair;
+  amount: number;
+}): Promise<string> {
+  const txb = new Transaction();
+  const rawAmount = Math.floor(amount * 1e9); // SUI has 9 decimals
+
+  const [coin] = txb.splitCoins(txb.gas, [rawAmount]);
+  
+  txb.moveCall({
+    target: `${SUI_CONTRACT_ADDRESS}::trading::start_session`,
+    arguments: [
+      txb.object(coin),
+      txb.pure.u64(rawAmount),
+      txb.pure.u64(Date.now()),
+    ],
+  });
+
+  txb.setGasBudget(10000000); // 0.01 SUI
+
+  const result = await suiClient.signAndExecuteTransaction({
+    signer,
+    transaction: txb,
+    options: {
+      showObjectChanges: true,
+    },
+  });
+
+  // Find the TradingSession object ID in objectChanges
+  const sessionObject = result.objectChanges?.find(
+    (change: any) =>
+      change.type === "created" &&
+      change.objectType.includes("::trading::TradingSession")
+  );
+
+  if (!sessionObject || !("objectId" in sessionObject)) {
+    throw new Error("TradingSession object not found in transaction results");
+  }
+
+  return sessionObject.objectId;
 }
 
 // Real cross-chain routing would use a bridge like Wormhole.
@@ -226,10 +254,5 @@ export async function crossChainTransfer(params: {
     });
   }
 
-  // For other chains, we simulate the bridge process
-  // In a real app, this would involve locking assets on Sui and emitting a VAA
-  return new Promise((resolve) => setTimeout(() => resolve({ 
-    success: true, 
-    digest: "0x" + Math.random().toString(16).slice(2) 
-  }), 2000));
+  throw new Error(`Cross-chain transfer to ${destinationChain} is not supported in this version. Only Sui-to-Sui transfers are currently active.`);
 }

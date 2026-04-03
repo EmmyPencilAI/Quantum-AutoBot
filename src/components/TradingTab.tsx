@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
-import { deriveSuiWallet, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
+import { deriveSuiWallet, transferOnChain, startSessionOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
 
 import { toast } from "sonner";
 
@@ -179,9 +179,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         // 1. Fund from internal wallet (Firestore only)
         console.log(`Funding ${amount} from internal wallet...`);
         const userRef = doc(db, "users", user.uid);
+        const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
         await updateDoc(userRef, {
           isTrading: true,
           initialInvestment: amount,
+          [balanceField]: amount,
           walletBalance: walletBalance - amount,
           tradingAsset: tradingAsset,
           activeStrategy: strategy,
@@ -191,11 +193,14 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
         toast.success(`Successfully funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
       } else {
-        // 2. Fund from on-chain (requires transfer to treasury)
+        // 2. Fund from on-chain (requires transfer to treasury or contract)
         const address = deriveSuiWallet(user.uid).toSuiAddress();
         const balances = await getAllBalances(address);
-        const currentOnChainBalance = tradingAsset === "USDC" ? balances.usdc : balances.usdt;
-        const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+        
+        let currentOnChainBalance = 0;
+        if (tradingAsset === "SUI") currentOnChainBalance = balances.sui;
+        else if (tradingAsset === "USDC") currentOnChainBalance = balances.usdc;
+        else currentOnChainBalance = balances.usdt;
 
         if (amount > currentOnChainBalance) {
           toast.error(`Insufficient balance. You have ${walletBalance.toFixed(2)} in internal wallet and ${currentOnChainBalance.toFixed(2)} on-chain.`, { id: "fund" });
@@ -211,21 +216,36 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
         console.log(`Funding ${amount} from on-chain...`);
         const keypair = deriveSuiWallet(user.uid);
-        await transferOnChain({
-          signer: keypair,
-          to: SUI_TREASURY_ADDRESS,
-          amount: amount,
-          coinType: coinType
-        });
+        let sessionId = null;
+
+        if (tradingAsset === "SUI") {
+          // Call Move contract for SUI funding
+          sessionId = await startSessionOnChain({
+            signer: keypair,
+            amount: amount,
+          });
+        } else {
+          // Transfer USDT/USDC to treasury
+          const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+          await transferOnChain({
+            signer: keypair,
+            to: SUI_TREASURY_ADDRESS,
+            amount: amount,
+            coinType: coinType
+          });
+        }
 
         const userRef = doc(db, "users", user.uid);
+        const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
         await updateDoc(userRef, {
           isTrading: true,
           initialInvestment: amount,
+          [balanceField]: amount,
           tradingAsset: tradingAsset,
           activeStrategy: strategy,
           activePair: selectedPair,
-          totalProfit: 0
+          totalProfit: 0,
+          tradingSessionId: sessionId // Store the session ID if it exists
         });
 
         toast.success(`Successfully funded ${amount} ${tradingAsset} from on-chain!`, { id: "fund" });
@@ -323,7 +343,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Fund Trading Account</h3>
           
           <div className="flex gap-2 mb-2">
-            {["USDT", "USDC"].map((asset) => (
+            {["SUI", "USDT", "USDC"].map((asset) => (
               <button
                 key={asset}
                 onClick={() => setTradingAsset(asset)}
@@ -360,7 +380,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             Wallet Balance: <span className="text-blue-400 font-bold">{walletBalance.toFixed(2)} USD</span>
           </p>
           <p className="text-[10px] text-white/40">
-            Trading Balance: <span className="text-green-400 font-bold">{initialInvestment.toFixed(2)} {tradingAsset}</span>
+            Trading Balance: <span className="text-green-400 font-bold">{(initialInvestment + pnl).toFixed(2)} {tradingAsset}</span>
           </p>
         </div>
 

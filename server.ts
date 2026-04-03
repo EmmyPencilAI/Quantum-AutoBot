@@ -7,11 +7,10 @@ import dotenv from "dotenv";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
-import { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
-import { getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
-import { decodeSuiPrivateKey as decodeSuiPrivateKeySDK } from "@mysten/sui/cryptography";
+import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { decodeSuiPrivateKey as decodeSuiPrivateKeySDK } from "@mysten/sui/cryptography";
 import { fromHex } from "@mysten/sui/utils";
 
 dotenv.config();
@@ -282,6 +281,19 @@ const SUI_TYPE = "0x2::sui::SUI";
 const SUI_CONTRACT_ADDRESS = process.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
 const SUI_TREASURY_ADDRESS = process.env.VITE_SUI_TREASURY_ADDRESS || "0x40e4e861562d786bbdc68e2ace97b579a6022e8a1d9bad850112138c301e0e41";
 
+async function findAdminCap(address: string): Promise<string | null> {
+  try {
+    const objects = await suiClient.getOwnedObjects({
+      owner: address,
+      filter: { StructType: `${SUI_CONTRACT_ADDRESS}::trading::AdminCap` },
+    });
+    return objects.data[0]?.data?.objectId || null;
+  } catch (e) {
+    console.error("Error finding AdminCap:", e);
+    return null;
+  }
+}
+
 // USDT on Sui Testnet
 const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad::coin::COIN";
 // USDC on Sui Testnet
@@ -519,6 +531,7 @@ async function startServer() {
         try {
           const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
           const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+          const adminAddress = keypair.toSuiAddress();
           
           console.log(`Attempting REAL on-chain settlement for ${walletAddress || uid} on Sui...`);
           
@@ -526,6 +539,26 @@ async function startServer() {
           const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
           const decimals = await getDecimals(coinType);
           
+          // If it's a contract-based SUI session, use the contract
+          if (tradingAsset === "SUI" && userData.tradingSessionId) {
+            console.log(`Using Move contract for SUI settlement. Session: ${userData.tradingSessionId}`);
+            
+            const adminCapId = await findAdminCap(adminAddress);
+            if (!adminCapId) throw new Error("AdminCap not found for the provided private key");
+
+            const rawFinalAmount = Math.floor(totalToUser * 1e9);
+            
+            txb.moveCall({
+              target: `${SUI_CONTRACT_ADDRESS}::trading::settle_session`,
+              arguments: [
+                txb.object(adminCapId),
+                txb.object(userData.tradingSessionId),
+                txb.pure.u64(rawFinalAmount),
+                txb.pure.u64(Date.now()),
+              ],
+            });
+          }
+
           // Platform Fee (0.1%)
           const feePercent = 0.001;
           const feeAmount = totalToUser * feePercent;
@@ -533,10 +566,10 @@ async function startServer() {
           
           const rawNetAmount = Math.floor(netAmount * Math.pow(10, decimals));
           const rawFeeAmount = Math.floor(feeAmount * Math.pow(10, decimals));
-
+          
           // Transfer the assets from Treasury back to User
           const coins = await suiClient.getCoins({
-            owner: keypair.toSuiAddress(),
+            owner: adminAddress,
             coinType: coinType,
           });
 
@@ -557,7 +590,7 @@ async function startServer() {
             const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
             txb.transferObjects([mainCoin], walletAddress || userData.walletAddress);
             
-            txb.setGasBudget(10000000); // 0.01 SUI
+            txb.setGasBudget(20000000); // 0.02 SUI
             
             const result = await suiClient.signAndExecuteTransaction({
               signer: keypair,

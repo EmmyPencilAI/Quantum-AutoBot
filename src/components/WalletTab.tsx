@@ -38,7 +38,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [isRequestingGas, setIsRequestingGas] = useState(false);
 
-  const chains = ["Sui", "BNB Chain", "Tron", "Solana"];
+  const chains = ["Sui"];
   const assets = ["SUI", "USDT", "USDC"];
 
   useEffect(() => {
