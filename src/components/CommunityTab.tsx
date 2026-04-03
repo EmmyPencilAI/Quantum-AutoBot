@@ -1,78 +1,27 @@
-import React, { useState, useEffect, useRef } from "react";
-import { MessageSquare, Heart, Share2, Plus, Send, MoreHorizontal, UserPlus, TrendingUp, Search, ChevronDown, ChevronUp } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { MessageSquare, Heart, Share2, Plus, Send, MoreHorizontal, UserPlus, TrendingUp, Search } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { db, handleFirestoreError, OperationType } from "../firebase";
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, increment, limit, setDoc, deleteDoc } from "firebase/firestore";
-import { toast } from "sonner";
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, increment } from "firebase/firestore";
 
 interface CommunityTabProps {
   user: any;
 }
 
-const formatDateTime = (date: any) => {
-  if (!date) return "";
-  try {
-    const d = date.toDate ? date.toDate() : new Date(date);
-    return d.toLocaleString(undefined, { 
-      month: 'short', 
-      day: 'numeric', 
-      year: 'numeric', 
-      hour: '2-digit', 
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  } catch (e) {
-    return "";
-  }
-};
-
 const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
   const [posts, setPosts] = useState<any[]>([]);
-  const [userLikes, setUserLikes] = useState<Record<string, boolean>>({});
-  const likeListenersRef = useRef<Record<string, () => void>>({});
   const [newPost, setNewPost] = useState("");
   const [loading, setLoading] = useState(false);
-  const [commentingOn, setCommentingOn] = useState<string | null>(null);
-  const [commentText, setCommentText] = useState("");
-  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    const q = query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(50));
-    const unsubscribePosts = onSnapshot(q, (snapshot) => {
+    const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const postsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setPosts(postsData);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, "posts");
     });
-    
-    return () => unsubscribePosts();
-  }, []);
-
-  useEffect(() => {
-    if (!user) {
-      (Object.values(likeListenersRef.current) as (() => void)[]).forEach(unsub => unsub());
-      likeListenersRef.current = {};
-      setUserLikes({});
-      return;
-    }
-    
-    posts.forEach(post => {
-      if (!likeListenersRef.current[post.id]) {
-        const likeRef = doc(db, "posts", post.id, "likes", user.uid);
-        const unsub = onSnapshot(likeRef, (likeDoc) => {
-          setUserLikes(prev => ({ ...prev, [post.id]: likeDoc.exists() }));
-        }, (error) => {
-          console.error(`Error listening to likes for post ${post.id}:`, error);
-        });
-        likeListenersRef.current[post.id] = unsub;
-      }
-    });
-  }, [user, posts]);
-
-  useEffect(() => {
-    return () => {
-      (Object.values(likeListenersRef.current) as (() => void)[]).forEach(unsub => unsub());
-    };
+    return () => unsubscribe();
   }, []);
 
   const handleCreatePost = async () => {
@@ -87,10 +36,9 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
         content: newPost,
         likesCount: 0,
         commentsCount: 0,
-        createdAt: serverTimestamp(),
+        createdAt: new Date().toISOString(),
       });
       setNewPost("");
-      toast.success("Post shared with the community!");
     } catch (e) {
       handleFirestoreError(e, OperationType.CREATE, path);
     } finally {
@@ -99,71 +47,15 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
   };
 
   const handleLike = async (postId: string) => {
-    if (!user) {
-      toast.error("Please log in to like posts");
-      return;
-    }
-    
-    const isLiked = userLikes[postId];
-    const postRef = doc(db, "posts", postId);
-    const likeRef = doc(db, "posts", postId, "likes", user.uid);
-    
+    const path = `posts/${postId}`;
     try {
-      if (isLiked) {
-        // Unlike
-        await deleteDoc(likeRef);
-        await updateDoc(postRef, {
-          likesCount: increment(-1)
-        });
-      } else {
-        // Like
-        await setDoc(likeRef, {
-          uid: user.uid,
-          createdAt: serverTimestamp()
-        });
-        await updateDoc(postRef, {
-          likesCount: increment(1)
-        });
-      }
-    } catch (e: any) {
-      console.error("Like error:", e);
-      handleFirestoreError(e, OperationType.UPDATE, `posts/${postId}/likes/${user.uid}`);
-    }
-  };
-
-  const handleComment = async (postId: string) => {
-    if (!commentText.trim() || !user) return;
-    setLoading(true);
-    
-    const postRef = doc(db, "posts", postId);
-    const commentsRef = collection(db, "posts", postId, "comments");
-
-    try {
-      await addDoc(commentsRef, {
-        uid: user.uid,
-        authorName: user.displayName || "Quantum Trader",
-        authorAvatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-        content: commentText,
-        createdAt: serverTimestamp()
-      });
-
+      const postRef = doc(db, "posts", postId);
       await updateDoc(postRef, {
-        commentsCount: increment(1)
+        likesCount: increment(1),
       });
-      
-      setCommentText("");
-      setCommentingOn(null);
-      toast.success("Comment added!");
-    } catch (e: any) {
-      console.error("Comment error:", e);
-      handleFirestoreError(e, OperationType.CREATE, `posts/${postId}/comments`);
-    } finally {
-      setLoading(false);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, path);
     }
-  };
-
-  const toggleComments = (postId: string) => {
-    setExpandedComments(prev => ({ ...prev, [postId]: !prev[postId] }));
   };
 
   return (
@@ -229,7 +121,7 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
                         {post.authorName}
                       </p>
                       <p className="text-[10px] md:text-xs text-white/40 truncate">
-                        {formatDateTime(post.createdAt)}
+                        {new Date(post.createdAt).toLocaleDateString()} • Just now
                       </p>
                     </div>
                   </div>
@@ -238,78 +130,22 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
                   </button>
                 </div>
                 <p className="text-white/80 leading-relaxed mb-4 md:mb-6 whitespace-pre-wrap text-sm md:text-base">{post.content}</p>
-                
                 <div className="flex items-center gap-4 md:gap-6 border-t border-white/5 pt-4 md:pt-6">
                   <button
                     onClick={() => handleLike(post.id)}
-                    className={`flex items-center gap-2 transition-colors group/btn shrink-0 ${
-                      userLikes[post.id] ? "text-red-500" : "text-white/40 hover:text-red-400"
-                    }`}
+                    className="flex items-center gap-2 text-white/40 hover:text-red-400 transition-colors group/btn shrink-0"
                   >
-                    <Heart 
-                      size={18} 
-                      className={`md:w-5 md:h-5 ${userLikes[post.id] ? "fill-red-500" : "group-hover/btn:fill-red-400"}`} 
-                    />
+                    <Heart size={18} className="md:w-5 md:h-5 group-hover/btn:fill-red-400" />
                     <span className="text-xs md:text-sm font-bold">{post.likesCount || 0}</span>
                   </button>
-                  <button 
-                    onClick={() => setCommentingOn(commentingOn === post.id ? null : post.id)}
-                    className="flex items-center gap-2 text-white/40 hover:text-blue-400 transition-colors group/btn shrink-0"
-                  >
+                  <button className="flex items-center gap-2 text-white/40 hover:text-blue-400 transition-colors group/btn shrink-0">
                     <MessageSquare size={18} className="md:w-5 md:h-5 group-hover/btn:fill-blue-400" />
                     <span className="text-xs md:text-sm font-bold">{post.commentsCount || 0}</span>
-                  </button>
-                  <button 
-                    onClick={() => toggleComments(post.id)}
-                    className="flex items-center gap-1 text-white/20 hover:text-white transition-colors text-[10px] md:text-xs"
-                  >
-                    {expandedComments[post.id] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    <span>{expandedComments[post.id] ? "Hide Comments" : "View Comments"}</span>
                   </button>
                   <button className="flex items-center gap-2 text-white/40 hover:text-green-400 transition-colors group/btn ml-auto shrink-0">
                     <Share2 size={18} className="md:w-5 md:h-5" />
                   </button>
                 </div>
-
-                {/* Comment Input */}
-                {commentingOn === post.id && (
-                  <motion.div 
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    className="mt-4 pt-4 border-t border-white/5"
-                  >
-                    <div className="flex gap-3">
-                      <img
-                        src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
-                        alt="Avatar"
-                        className="w-8 h-8 rounded-full bg-white/5 shrink-0"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="flex-1 flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="Write a comment..."
-                          value={commentText}
-                          onChange={(e) => setCommentText(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleComment(post.id)}
-                          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 focus:outline-none focus:border-orange-500 transition-all text-xs md:text-sm"
-                        />
-                        <button
-                          onClick={() => handleComment(post.id)}
-                          disabled={!commentText.trim() || loading}
-                          className="bg-orange-500 text-black p-2 rounded-xl hover:scale-105 transition-all disabled:opacity-50"
-                        >
-                          <Send size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                {/* Comments List */}
-                {expandedComments[post.id] && (
-                  <CommentsList postId={post.id} />
-                )}
               </motion.div>
             ))}
           </AnimatePresence>
@@ -371,45 +207,6 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
           <button className="w-full mt-6 text-orange-500 text-sm font-bold hover:underline">View All</button>
         </div>
       </div>
-    </div>
-  );
-};
-
-const CommentsList: React.FC<{ postId: string }> = ({ postId }) => {
-  const [comments, setComments] = useState<any[]>([]);
-
-  useEffect(() => {
-    const q = query(collection(db, "posts", postId, "comments"), orderBy("createdAt", "asc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      console.error(`Error listening to comments for post ${postId}:`, error);
-      // We don't throw here to avoid crashing the UI, just log it
-    });
-    return () => unsubscribe();
-  }, [postId]);
-
-  if (comments.length === 0) return null;
-
-  return (
-    <div className="mt-4 space-y-3 pl-4 border-l border-white/5">
-      {comments.map((comment) => (
-        <div key={comment.id} className="flex gap-2 items-start">
-          <img
-            src={comment.authorAvatar}
-            alt={comment.authorName}
-            className="w-6 h-6 rounded-full bg-white/5 shrink-0"
-            referrerPolicy="no-referrer"
-          />
-          <div className="bg-white/5 rounded-xl p-2 flex-1">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-bold text-orange-500">{comment.authorName}</span>
-              <span className="text-[8px] text-white/20">{formatDateTime(comment.createdAt)}</span>
-            </div>
-            <p className="text-[11px] text-white/80">{comment.content}</p>
-          </div>
-        </div>
-      ))}
     </div>
   );
 };

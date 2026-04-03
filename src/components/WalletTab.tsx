@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
+import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap } from "lucide-react";
 import { motion } from "motion/react";
-import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
+import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS } from "../lib/sui";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { Bell, CheckCircle2, Info, AlertCircle } from "lucide-react";
-
-import { toast } from "sonner";
 
 interface WalletTabProps {
   user: any;
@@ -22,24 +20,14 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     recipient: "",
     amount: "",
     chain: "Sui",
-    asset: "USDT",
   });
   const [sending, setSending] = useState(false);
   const [toppingUp, setToppingUp] = useState(false);
 
-  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const [withdrawParams, setWithdrawParams] = useState({
-    amount: "",
-    asset: "USDT",
-    externalAddress: "",
-  });
-  const [withdrawing, setWithdrawing] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
-  const [isRequestingGas, setIsRequestingGas] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const chains = ["Sui"];
-  const assets = ["SUI", "USDT", "USDC"];
+  const chains = ["Sui", "BNB Chain", "Tron", "Solana"];
 
   useEffect(() => {
     if (user) {
@@ -62,27 +50,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     }
   }, [user]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(address);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleRequestGas = async () => {
-    if (!address) return;
-    setIsRequestingGas(true);
-    toast.loading("Requesting Testnet SUI...", { id: "gas" });
-    try {
-      await requestTestnetGas(address);
-      toast.success("Gas requested! It may take a minute to reflect in your balance.", { id: "gas" });
-      setTimeout(() => refreshBalances(address), 5000);
-    } catch (error: any) {
-      toast.error(`Faucet failed: ${error.message}`, { id: "gas" });
-    } finally {
-      setIsRequestingGas(false);
-    }
-  };
-
   const refreshBalances = async (addr: string) => {
     setLoading(true);
     try {
@@ -101,23 +68,21 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     }
   };
 
+  const handleCopy = () => {
+    navigator.clipboard.writeText(address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const handleSend = async () => {
     if (!sendParams.recipient || !sendParams.amount) return;
     setSending(true);
-    toast.loading("Sending transaction...", { id: "send" });
     try {
-      const keypair = deriveSuiWallet(user.uid);
-      let coinType = USDT_TYPE;
-      if (sendParams.asset === "SUI") coinType = SUI_TYPE;
-      if (sendParams.asset === "USDC") coinType = USDC_TYPE;
-
       const result = await crossChainTransfer({
-        signer: keypair,
         fromAddress: address,
         toAddress: sendParams.recipient,
         amount: parseFloat(sendParams.amount),
         destinationChain: sendParams.chain,
-        coinType: coinType
       });
       console.log("Transfer successful:", result);
       
@@ -126,42 +91,39 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         uid: user.uid,
         type: "TRANSFER_SENT",
         title: "Transfer Sent",
-        message: `Successfully sent ${sendParams.amount} ${sendParams.asset} to ${sendParams.recipient.slice(0, 6)}... on ${sendParams.chain}.`,
+        message: `Successfully sent ${sendParams.amount} USDT to ${sendParams.recipient.slice(0, 6)}... on ${sendParams.chain}.`,
         amount: parseFloat(sendParams.amount),
-        asset: sendParams.asset,
+        asset: "USDT",
         timestamp: new Date().toISOString(),
         read: false
       });
 
-      toast.success(`Successfully sent ${sendParams.amount} ${sendParams.asset}!`, { id: "send" });
       setShowSendModal(false);
       refreshBalances(address);
-    } catch (e: any) {
+    } catch (e) {
       console.error("Transfer failed:", e);
-      toast.error("Transfer failed: " + (e.message || "Unknown error"), { id: "send" });
     } finally {
       setSending(false);
     }
   };
 
-  const handleDeposit = async () => {
+  const handleTopUp = async () => {
     if (balances.usdt <= 0 && balances.usdc <= 0) {
-      toast.error("No USDT or USDC found on-chain to deposit.");
+      alert("No USDT or USDC found on-chain to top up.");
       return;
     }
     
     setToppingUp(true);
-    toast.loading("Processing deposit...", { id: "deposit" });
     try {
       const keypair = deriveSuiWallet(user.uid);
       
-      // Deposit both if available
+      // Top up both if available
       const usdtAmount = balances.usdt;
       const usdcAmount = balances.usdc;
       const totalAmount = usdtAmount + usdcAmount;
       
       if (usdtAmount > 0) {
-        console.log(`Depositing ${usdtAmount} USDT from on-chain...`);
+        console.log(`Topping up ${usdtAmount} USDT from on-chain...`);
         await transferOnChain({
           signer: keypair,
           to: SUI_TREASURY_ADDRESS,
@@ -171,7 +133,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       }
       
       if (usdcAmount > 0) {
-        console.log(`Depositing ${usdcAmount} USDC from on-chain...`);
+        console.log(`Topping up ${usdcAmount} USDC from on-chain...`);
         await transferOnChain({
           signer: keypair,
           to: SUI_TREASURY_ADDRESS,
@@ -189,75 +151,22 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       // Add notification
       await setDoc(doc(collection(db, "notifications")), {
         uid: user.uid,
-        type: "DEPOSIT",
-        title: "Wallet Funded",
-        message: `Successfully deposited ${totalAmount.toFixed(2)} USD from on-chain assets.`,
+        type: "TOP_UP",
+        title: "Wallet Topped Up",
+        message: `Successfully topped up ${totalAmount.toFixed(2)} USD from on-chain assets.`,
         amount: totalAmount,
         asset: "USD",
         timestamp: new Date().toISOString(),
         read: false
       });
       
-      toast.success(`Successfully deposited ${totalAmount.toFixed(2)} USD!`, { id: "deposit" });
+      alert(`Successfully topped up ${totalAmount.toFixed(2)} USD!`);
       refreshBalances(address);
     } catch (e: any) {
-      console.error("Deposit failed:", e);
-      toast.error("Deposit failed: " + (e.message || "Unknown error"), { id: "deposit" });
+      console.error("Top up failed:", e);
+      alert("Top up failed: " + (e.message || "Unknown error"));
     } finally {
       setToppingUp(false);
-    }
-  };
-
-  const handleWithdraw = async () => {
-    const amount = parseFloat(withdrawParams.amount);
-    if (isNaN(amount) || amount <= 0) {
-      toast.error("Please enter a valid amount.");
-      return;
-    }
-
-    if (amount > balances.wallet) {
-      toast.error("Insufficient trading wallet balance.");
-      return;
-    }
-
-    setWithdrawing(true);
-    toast.loading("Processing withdrawal...", { id: "withdraw" });
-    try {
-      const response = await fetch("/api/wallet/withdraw", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          uid: user.uid,
-          amount,
-          asset: withdrawParams.asset,
-          walletAddress: withdrawParams.externalAddress || address
-        })
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error("Withdrawal API error:", text);
-        try {
-          const errorData = JSON.parse(text);
-          throw new Error(errorData.error || `Server error: ${response.status}`);
-        } catch (e) {
-          throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
-        }
-      }
-
-      const result = await response.json();
-      if (result.success) {
-        toast.success(`Successfully withdrawn ${amount} ${withdrawParams.asset} to your on-chain wallet.`, { id: "withdraw" });
-        setShowWithdrawModal(false);
-        refreshBalances(address);
-      } else {
-        throw new Error(result.error || "Withdrawal failed");
-      }
-    } catch (e: any) {
-      console.error("Withdrawal failed:", e);
-      toast.error("Withdrawal failed: " + (e.message || "Unknown error"), { id: "withdraw" });
-    } finally {
-      setWithdrawing(false);
     }
   };
 
@@ -319,19 +228,9 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
             <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.sui.toFixed(4)}</h3>
             <span className="text-orange-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">SUI</span>
           </div>
-          <div className="mt-3 md:mt-6 flex flex-wrap gap-2">
-            <div className="flex items-center gap-1.5 text-[8px] md:text-xs text-green-400 bg-green-400/10 w-fit px-2 md:px-3 py-1 rounded-full">
-              <ShieldCheck size={10} className="md:w-3 md:h-3" />
-              <span>Secured</span>
-            </div>
-            <button
-              onClick={handleRequestGas}
-              disabled={isRequestingGas}
-              className="flex items-center gap-1.5 text-[8px] md:text-xs text-blue-400 bg-blue-400/10 w-fit px-2 md:px-3 py-1 rounded-full hover:bg-blue-400/20 transition-colors disabled:opacity-50"
-            >
-              <Droplets size={10} className={`md:w-3 md:h-3 ${isRequestingGas ? "animate-pulse" : ""}`} />
-              <span>{isRequestingGas ? "Requesting..." : "Get Gas"}</span>
-            </button>
+          <div className="mt-3 md:mt-6 flex items-center gap-1.5 text-[8px] md:text-xs text-green-400 bg-green-400/10 w-fit px-2 md:px-3 py-1 rounded-full">
+            <ShieldCheck size={10} className="md:w-3 md:h-3" />
+            <span>Secured</span>
           </div>
         </div>
 
@@ -372,20 +271,12 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
             <span className="text-white/40 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USD</span>
           </div>
           <button 
-            onClick={handleDeposit}
+            onClick={handleTopUp}
             disabled={toppingUp || (balances.usdt <= 0 && balances.usdc <= 0)}
             className="mt-3 md:mt-4 w-full bg-orange-500/10 border border-orange-500/20 text-orange-500 font-bold py-2 rounded-lg md:rounded-xl hover:bg-orange-500/20 transition-all flex items-center justify-center gap-2 text-[10px] md:text-xs disabled:opacity-50"
           >
             <Plus size={14} />
-            <span>{toppingUp ? "Processing..." : "Deposit Assets"}</span>
-          </button>
-          <button 
-            onClick={() => setShowWithdrawModal(true)}
-            disabled={balances.wallet <= 0}
-            className="mt-2 w-full bg-white/5 border border-white/10 text-white/60 font-bold py-2 rounded-lg md:rounded-xl hover:bg-white/10 transition-all flex items-center justify-center gap-2 text-[10px] md:text-xs disabled:opacity-50"
-          >
-            <Send size={14} className="rotate-180" />
-            <span>Withdraw to On-chain</span>
+            <span>{toppingUp ? "Processing..." : "Top Up"}</span>
           </button>
         </div>
       </div>
@@ -430,33 +321,23 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           <button className="text-orange-500 text-[10px] md:text-sm font-bold hover:underline">View All</button>
         </div>
         <div className="space-y-2 md:space-y-4">
-          {notifications.length > 0 ? (
-            notifications.slice(0, 5).map((n) => (
-              <div key={n.id} className="flex items-center justify-between p-3 md:p-4 bg-white/5 rounded-lg md:rounded-2xl border border-white/5">
-                <div className="flex items-center gap-3 md:gap-4">
-                  <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${
-                    n.type === 'DEPOSIT' || n.type === 'TRADE_STOPPED' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-                  }`}>
-                    {n.type === 'DEPOSIT' || n.type === 'TRADE_STOPPED' ? <ArrowDownLeft size={16} className="md:w-5 md:h-5" /> : <Send size={16} className="md:w-5 md:h-5" />}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-bold text-xs md:text-base truncate">{n.title}</p>
-                    <p className="text-[9px] md:text-xs text-white/40 truncate">{n.message}</p>
-                  </div>
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex items-center justify-between p-3 md:p-4 bg-white/5 rounded-lg md:rounded-2xl border border-white/5">
+              <div className="flex items-center gap-3 md:gap-4">
+                <div className="w-8 h-8 md:w-10 md:h-10 bg-green-500/10 rounded-lg md:rounded-xl flex items-center justify-center text-green-400 shrink-0">
+                  <ArrowDownLeft size={16} className="md:w-5 md:h-5" />
                 </div>
-                <div className="text-right shrink-0">
-                  <p className={`font-bold text-xs md:text-base ${n.amount >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {n.amount ? (n.amount >= 0 ? "+" : "") + n.amount.toFixed(2) : ""}
-                  </p>
-                  <p className="text-[9px] md:text-xs text-white/40">{new Date(n.timestamp).toLocaleDateString()}</p>
+                <div className="min-w-0">
+                  <p className="font-bold text-xs md:text-base truncate">Received USDT</p>
+                  <p className="text-[9px] md:text-xs text-white/40 truncate">From: 0x82...3921</p>
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="py-8 text-center bg-white/5 rounded-xl border border-dashed border-white/10">
-              <p className="text-xs md:text-sm text-white/20 italic">No recent activity</p>
+              <div className="text-right shrink-0">
+                <p className="font-bold text-green-400 text-xs md:text-base">+500.00</p>
+                <p className="text-[9px] md:text-xs text-white/40">2h ago</p>
+              </div>
             </div>
-          )}
+          ))}
         </div>
       </div>
 
@@ -471,25 +352,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
             <h3 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">Send USDT</h3>
             
             <div className="space-y-4">
-              <div>
-                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Asset</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {assets.map((asset) => (
-                    <button
-                      key={asset}
-                      onClick={() => setSendParams({ ...sendParams, asset })}
-                      className={`py-2 md:py-3 rounded-lg md:rounded-xl border font-bold text-[10px] md:text-sm transition-all ${
-                        sendParams.asset === asset
-                          ? "bg-orange-500 border-orange-500 text-black"
-                          : "bg-white/5 border-white/10 text-white/60 hover:border-white/20"
-                      }`}
-                    >
-                      {asset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <div>
                 <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Destination Chain</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -521,7 +383,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
               </div>
 
               <div>
-                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Amount ({sendParams.asset})</label>
+                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Amount (USDT)</label>
                 <input
                   type="number"
                   placeholder="0.00"
@@ -555,99 +417,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
                   className="flex-1 bg-orange-500 text-black py-3 md:py-4 rounded-lg md:rounded-2xl font-bold text-xs md:text-base hover:scale-[1.02] transition-all disabled:opacity-50"
                 >
                   {sending ? "Sending..." : "Confirm"}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Withdraw Modal */}
-      {showWithdrawModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-4 bg-black/90 backdrop-blur-md">
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-5 md:p-8 w-full max-w-md shadow-2xl"
-          >
-            <h3 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">Withdraw to On-chain</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Asset</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {["USDT", "USDC"].map((asset) => (
-                    <button
-                      key={asset}
-                      onClick={() => setWithdrawParams({ ...withdrawParams, asset })}
-                      className={`py-2 md:py-3 rounded-lg md:rounded-xl border font-bold text-[10px] md:text-sm transition-all ${
-                        withdrawParams.asset === asset
-                          ? "bg-orange-500 border-orange-500 text-black"
-                          : "bg-white/5 border-white/10 text-white/60 hover:border-white/20"
-                      }`}
-                    >
-                      {asset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Amount (USD)</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    placeholder="0.00"
-                    value={withdrawParams.amount}
-                    onChange={(e) => setWithdrawParams({ ...withdrawParams, amount: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg md:rounded-xl px-3 md:px-4 py-2.5 md:py-3 focus:outline-none focus:border-orange-500 transition-all font-bold text-sm md:text-lg"
-                  />
-                  <button 
-                    onClick={() => setWithdrawParams({ ...withdrawParams, amount: balances.wallet.toString() })}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-orange-500 hover:text-orange-400"
-                  >
-                    MAX
-                  </button>
-                </div>
-                <p className="mt-1 text-[10px] text-white/20">Available: {balances.wallet.toFixed(2)} USD</p>
-              </div>
-
-              <div>
-                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Destination Address (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="Leave empty for internal wallet"
-                  value={withdrawParams.externalAddress}
-                  onChange={(e) => setWithdrawParams({ ...withdrawParams, externalAddress: e.target.value })}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg md:rounded-xl px-3 md:px-4 py-2.5 md:py-3 focus:outline-none focus:border-orange-500 transition-all font-mono text-[10px] md:text-sm"
-                />
-                <p className="mt-1 text-[8px] text-white/20">If empty, funds will be sent to your internal address: {address.slice(0, 8)}...</p>
-              </div>
-
-              <div className="bg-orange-500/10 border border-orange-500/20 p-3 md:p-4 rounded-xl md:rounded-2xl space-y-1 md:space-y-2">
-                <div className="flex justify-between text-[9px] md:text-xs">
-                  <span className="text-white/40">Network Fee</span>
-                  <span className="font-bold">0.50 SUI (Treasury Paid)</span>
-                </div>
-                <div className="flex justify-between text-[9px] md:text-xs">
-                  <span className="text-white/40">Destination</span>
-                  <span className="font-bold font-mono">{(withdrawParams.externalAddress || address).slice(0, 6)}...{(withdrawParams.externalAddress || address).slice(-6)}</span>
-                </div>
-              </div>
-
-              <div className="flex gap-2 md:gap-3 pt-2">
-                <button
-                  onClick={() => setShowWithdrawModal(false)}
-                  className="flex-1 bg-white/5 border border-white/10 py-3 md:py-4 rounded-lg md:rounded-2xl font-bold text-xs md:text-base hover:bg-white/10 transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleWithdraw}
-                  disabled={withdrawing || !withdrawParams.amount || parseFloat(withdrawParams.amount) <= 0}
-                  className="flex-1 bg-orange-500 text-black py-3 md:py-4 rounded-lg md:rounded-2xl font-bold text-xs md:text-base hover:scale-[1.02] transition-all disabled:opacity-50"
-                >
-                  {withdrawing ? "Processing..." : "Confirm Withdrawal"}
                 </button>
               </div>
             </div>
