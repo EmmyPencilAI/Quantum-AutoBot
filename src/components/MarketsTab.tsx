@@ -11,10 +11,7 @@ const MarketsTab: React.FC = () => {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/tv.js";
-    script.async = true;
-    script.onload = () => {
+    const initWidget = () => {
       if (container.current && window.TradingView) {
         // Adjust height based on screen size
         const height = window.innerWidth < 640 ? 300 : 500;
@@ -43,12 +40,19 @@ const MarketsTab: React.FC = () => {
         });
       }
     };
-    document.head.appendChild(script);
 
-    return () => {
-      const scriptElement = document.querySelector('script[src="https://s3.tradingview.com/tv.js"]');
-      if (scriptElement) scriptElement.remove();
-    };
+    if (window.TradingView) {
+      initWidget();
+    } else {
+      // Fallback if script is not yet loaded
+      const interval = setInterval(() => {
+        if (window.TradingView) {
+          initWidget();
+          clearInterval(interval);
+        }
+      }, 500);
+      return () => clearInterval(interval);
+    }
   }, []);
 
   const marketData = [
