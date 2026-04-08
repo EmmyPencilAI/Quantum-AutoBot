@@ -13,7 +13,7 @@ import CommunityTab from "./components/CommunityTab";
 import SettingsTab from "./components/SettingsTab";
 import { deriveSuiWallet } from "./lib/sui";
 
-import ErrorBoundary from "./components/ErrorBoundary.tsx";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { Toaster } from "sonner";
 
 const App: React.FC = () => {

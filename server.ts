@@ -625,6 +625,105 @@ async function startServer() {
     }
   });
 
+  // Withdraw profit without stopping trade
+  app.post("/api/trading/withdraw-profit", async (req, res) => {
+    const { uid, walletAddress } = req.body;
+    if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
+
+    try {
+      const userRef = db.collection("users").doc(uid);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const userData = userDoc.data();
+      if (!userData.isTrading) return res.status(400).json({ error: "No active trading session" });
+
+      const tradingAsset = userData.tradingAsset || "USDT";
+      const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+      
+      const currentAssetBalance = userData[balanceField] || 0;
+      const initialInvestment = userData.initialInvestment || 0;
+      const profit = currentAssetBalance - initialInvestment;
+
+      if (profit <= 0) return res.status(400).json({ error: "No profit to withdraw" });
+
+      // Calculate shares (50/50 split on profit)
+      const userProfitShare = profit * 0.5;
+      const treasuryShare = profit * 0.5;
+
+      // Update Firestore
+      const walletBalance = userData.walletBalance || 0;
+      const newWalletBalance = walletBalance + userProfitShare;
+
+      await userRef.update({
+        [balanceField]: initialInvestment, // Reset trading balance to initial
+        walletBalance: newWalletBalance,
+        totalProfit: (userData.totalProfit || 0) - userProfitShare // Adjust total profit since we're withdrawing it
+      });
+
+      // Create notification
+      await db.collection("notifications").add({
+        uid,
+        type: "PROFIT_WITHDRAWAL",
+        title: "Profit Withdrawn",
+        message: `Withdrawn ${userProfitShare.toFixed(2)} ${tradingAsset} profit to your wallet balance.`,
+        amount: userProfitShare,
+        asset: tradingAsset,
+        timestamp: new Date().toISOString(),
+        read: false
+      });
+
+      // Real On-Chain Transfer (Simulated for demo, but structured for real Sui)
+      let txHash = "0x" + Math.random().toString(16).slice(2);
+      let onChainError = null;
+
+      if (process.env.SUI_PRIVATE_KEY) {
+        try {
+          const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
+          const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+          const txb = new Transaction();
+          const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+          const decimals = await getDecimals(coinType);
+          
+          const rawNetAmount = Math.floor(userProfitShare * Math.pow(10, decimals));
+          const rawFeeAmount = Math.floor(treasuryShare * Math.pow(10, decimals));
+
+          const coins = await suiClient.getCoins({
+            owner: keypair.toSuiAddress(),
+            coinType: coinType,
+          });
+
+          if (coins.data.length > 0) {
+            const coinObjectIds = coins.data.map((c) => c.coinObjectId);
+            const primaryCoin = coinObjectIds[0];
+            const rest = coinObjectIds.slice(1);
+            if (rest.length > 0) txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
+
+            if (rawFeeAmount > 0) {
+              const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
+              txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+            }
+
+            const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
+            txb.transferObjects([mainCoin], walletAddress || userData.walletAddress);
+            
+            txb.setGasBudget(10000000);
+            const result = await suiClient.signAndExecuteTransaction({ signer: keypair, transaction: txb });
+            txHash = result.digest;
+          }
+        } catch (e: any) {
+          console.error("Real Sui profit withdrawal failed:", e);
+          onChainError = e.message;
+        }
+      }
+
+      res.json({ success: true, withdrawn: userProfitShare, txHash, onChainError });
+    } catch (error: any) {
+      console.error("Profit withdrawal error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Community Comments
   app.post("/api/community/comment", async (req, res) => {
     console.log("POST /api/community/comment", req.body);

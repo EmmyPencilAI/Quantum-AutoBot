@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2 } from "lucide-react";
+import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2, ArrowDownLeft } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
@@ -345,6 +345,37 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     }
   };
 
+  const withdrawProfit = async () => {
+    if (!user || pnl <= 0) return;
+    setLoading(true);
+    toast.loading("Withdrawing profit to wallet balance...", { id: "withdraw-profit" });
+    try {
+      const address = deriveSuiWallet(user.uid).toSuiAddress();
+      const response = await fetch("/api/trading/withdraw-profit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: user.uid, walletAddress: address })
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Server error (${response.status}): ${text}`);
+      }
+
+      const result = await response.json();
+      if (result.success) {
+        toast.success(`Successfully withdrawn ${result.withdrawn.toFixed(2)} to wallet balance!`, { id: "withdraw-profit" });
+      } else {
+        throw new Error(result.error || "Withdrawal failed");
+      }
+    } catch (e: any) {
+      console.error("Profit withdrawal failed:", e);
+      toast.error(e.message || "Withdrawal failed", { id: "withdraw-profit" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const tradingPairs = [
     { symbol: "BTC / USDT", logo: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
     { symbol: "ETH / USDT", logo: "https://assets.coingecko.com/coins/images/279/large/ethereum.png" },
@@ -404,7 +435,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               onClick={() => setShowWithdrawModal(true)}
               className="text-[10px] font-bold text-orange-500 hover:underline flex items-center gap-1"
             >
-              Withdraw to Wallet
+              Withdraw to On-chain Wallet
             </button>
           </div>
           
@@ -501,14 +532,24 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           </div>
 
           {isTrading && (
-            <button
-              onClick={toggleTrading}
-              disabled={loading}
-              className="w-full py-4 md:py-6 rounded-xl md:rounded-3xl font-bold text-base md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 shadow-xl shadow-red-500/5"
-            >
-              <Square size={18} className="md:w-6 md:h-6" fill="currentColor" />
-              <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Stop Trading & Settle"}</span>
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={withdrawProfit}
+                disabled={loading || pnl <= 0}
+                className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all bg-green-500/10 border border-green-500/20 text-green-500 hover:bg-green-500/20 disabled:opacity-50"
+              >
+                <ArrowDownLeft size={16} />
+                <span>Withdraw Profit to Wallet Balance</span>
+              </button>
+              <button
+                onClick={toggleTrading}
+                disabled={loading}
+                className="w-full py-4 md:py-6 rounded-xl md:rounded-3xl font-bold text-base md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 shadow-xl shadow-red-500/5"
+              >
+                <Square size={18} className="md:w-6 md:h-6" fill="currentColor" />
+                <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Stop & Withdraw to Wallet Balance"}</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -628,7 +669,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               exit={{ opacity: 0, scale: 0.95 }}
               className="bg-[#0a0a0a] border border-white/10 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl"
             >
-              <h3 className="text-xl md:text-2xl font-bold mb-6">Withdraw to On-chain</h3>
+              <h3 className="text-xl md:text-2xl font-bold mb-6">Withdraw to On-chain Wallet</h3>
               
               <div className="space-y-4">
                 <div>
