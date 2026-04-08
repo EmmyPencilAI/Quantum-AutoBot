@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
-import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey as decodeSuiPrivateKeySDK } from "@mysten/sui/cryptography";
@@ -27,7 +27,7 @@ function decodeSuiPrivateKey(key: string): Uint8Array {
 }
 
 // Sui Client for Backend
-const suiClient = new SuiClient({ url: getFullnodeUrl("testnet"), network: "testnet" });
+const suiClient = new SuiClient({ url: getFullnodeUrl("testnet") });
 
 // Load Firebase Config
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
@@ -43,40 +43,50 @@ if (fs.existsSync(firebaseConfigPath)) {
         admin.initializeApp({
           projectId: firebaseConfig.projectId,
         });
-        console.log(`✓ Firebase Admin initialized with projectId: ${firebaseConfig.projectId}`);
-      } catch (e: any) {
-        console.warn("⚠ Firebase Admin initialization failed. This is expected if GOOGLE_APPLICATION_CREDENTIALS is not set.");
-        console.warn("To enable backend features, set up credentials:");
-        console.warn("  1. Get service account JSON from Firebase Console → Settings → Service Accounts");
-        console.warn("  2. Save as firebase-service-account.json");
-        console.warn("  3. Add to .env: GOOGLE_APPLICATION_CREDENTIALS=./firebase-service-account.json");
+        console.log(`Firebase Admin initialized with explicit projectId: ${firebaseConfig.projectId}`);
+      } catch (e) {
+        console.warn("Explicit Firebase Admin initialization failed, trying default:", e);
+        try {
+          admin.initializeApp();
+          console.log("Firebase Admin initialized with default environment config");
+        } catch (e2) {
+          console.error("Critical: Firebase Admin initialization failed completely:", e2);
+        }
       }
     }
     
-    // Try to get db only if admin was successfully initialized
-    if (admin.apps.length > 0) {
-      const adminApp = admin.app();
-      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-      
+    const adminApp = admin.app();
+    // Use the named database if provided, otherwise default
+    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+    
+    try {
+      db = getFirestore(adminApp, dbId);
+      // Test the connection immediately with a write operation
+      await db.collection("health_check").doc("ping").set({ 
+        lastPing: new Date().toISOString(),
+        projectId: firebaseConfig.projectId,
+        databaseId: dbId
+      });
+      console.log(`Firebase Admin connected successfully to database: ${dbId}`);
+    } catch (e: any) {
+      console.error(`Failed to connect to named database ${dbId}, falling back to (default):`, e.message);
       try {
-        db = getFirestore(adminApp, dbId);
-        // Test the connection immediately with a write operation
+        db = getFirestore(adminApp, "(default)");
         await db.collection("health_check").doc("ping").set({ 
           lastPing: new Date().toISOString(),
           projectId: firebaseConfig.projectId,
-          databaseId: dbId
+          databaseId: "(default)"
         });
-        console.log(`✓ Firestore connected to database: ${dbId}`);
-      } catch (e: any) {
-        console.warn(`⚠ Firestore connection failed: ${e.message}`);
-        db = null; // Ensure db is null so background jobs skip
+        console.log("Firebase Admin connected successfully to (default) database");
+      } catch (e2: any) {
+        console.error("Critical: Failed to connect to both named and (default) databases:", e2.message);
       }
     }
+    
+    console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
   } catch (e) {
-    console.error("Error reading firebase-applet-config.json:", e);
+    console.error("Critical failure during Firebase Admin initialization:", e);
   }
-} else {
-  console.warn("⚠ firebase-applet-config.json not found");
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -120,7 +130,7 @@ const WHALE_ALERTS = [
 
 async function postBotMessage() {
   if (!db) {
-    // Silently skip if db not initialized
+    console.warn("Bot skipped post: Firestore Admin not initialized");
     return;
   }
   try {
@@ -140,26 +150,24 @@ async function postBotMessage() {
       createdAt: new Date().toISOString()
     };
     
+    console.log("Bot (Admin SDK) attempting to post:", JSON.stringify(postData));
     await db.collection("posts").add(postData);
-    console.log("✓ Bot posted:", message.substring(0, 50) + "...");
+    console.log("Bot (Admin SDK) posted successfully:", message);
   } catch (error: any) {
-    console.error("✗ Bot failed to post:", error.message || error);
+    console.error("Bot (Admin SDK) failed to post:", error.message || error);
   }
 }
 
-// Post every 15 minutes (only if db is initialized)
+// Post every 15 minutes
 if (db) {
-  console.log("✓ Bot posting enabled (every 15 minutes)");
   setInterval(postBotMessage, 900000);
   // Post one immediately on start
   setTimeout(postBotMessage, 5000);
-} else {
-  console.log("ℹ Bot posting disabled (Firestore not connected)");
 }
 
 // Background Trading Engine
 async function processBackgroundTrades() {
-  if (!db) return; // Silently skip if db not initialized
+  if (!db) return;
   
   try {
     const usersRef = db.collection("users");
@@ -168,7 +176,8 @@ async function processBackgroundTrades() {
       await usersRef.limit(1).get();
     } catch (e: any) {
       if (e.code === 5 || e.message?.includes("NOT_FOUND")) {
-        return; // Collection doesn't exist yet, skip
+        console.warn("Firestore collection 'users' not found or initialized yet. Skipping background trades.");
+        return;
       }
       throw e;
     }
@@ -183,7 +192,7 @@ async function processBackgroundTrades() {
       return;
     }
     
-    console.log(`✓ Processing trades for ${tradingUsers.size} users...`);
+    console.log(`Processing background trades for ${tradingUsers.size} users...`);
     
     const batch = db.batch();
     const now = new Date().toISOString();
@@ -250,17 +259,20 @@ async function processBackgroundTrades() {
     }
     
     await batch.commit();
+    console.log(`Background trades processed successfully for ${tradingUsers.size} users`);
   } catch (error: any) {
-    console.error("Error in background trading:", error.message || error);
+    console.error("Error in background trading loop:", error.message || error);
+    if (error.code === 7 || error.message?.includes("PERMISSION_DENIED")) {
+      console.error("CRITICAL: Permission denied in background trading loop. Check Firebase Admin credentials and project permissions.");
+    } else if (error.code === 5 || error.message?.includes("NOT_FOUND")) {
+      console.warn("Firestore collection not found or initialized yet. Skipping background trades.");
+    }
   }
 }
 
-// Run background trading every 5 seconds (only if db is initialized)
+// Run background trading every 5 seconds for real-time feel
 if (db) {
-  console.log("✓ Background trading enabled");
   setInterval(processBackgroundTrades, 5000);
-} else {
-  console.log("ℹ Background trading disabled (Firestore not connected)");
 }
 
 // Sui Config (Mirroring src/lib/sui.ts)
@@ -393,9 +405,9 @@ async function startServer() {
           
           txb.setGasBudget(10000000); // 0.01 SUI
           
-          const result = await suiClient.signAndExecuteTransaction({
+          const result = await suiClient.signAndExecuteTransactionBlock({
             signer: keypair,
-            transaction: txb,
+            transactionBlock: txb,
           });
           
           txHash = result.digest;
@@ -580,9 +592,9 @@ async function startServer() {
             
             txb.setGasBudget(20000000); // 0.02 SUI
             
-            const result = await suiClient.signAndExecuteTransaction({
+            const result = await suiClient.signAndExecuteTransactionBlock({
               signer: keypair,
-              transaction: txb,
+              transactionBlock: txb,
             });
             
             txHash = result.digest;
@@ -696,7 +708,7 @@ async function startServer() {
             txb.transferObjects([mainCoin], walletAddress || userData.walletAddress);
             
             txb.setGasBudget(10000000);
-            const result = await suiClient.signAndExecuteTransaction({ signer: keypair, transaction: txb });
+            const result = await suiClient.signAndExecuteTransactionBlock({ signer: keypair, transactionBlock: txb });
             txHash = result.digest;
           }
         } catch (e: any) {
@@ -790,76 +802,6 @@ async function startServer() {
     } catch (error: any) {
       console.error("Like error:", error);
       res.status(500).json({ success: false, error: error.message || "Internal server error" });
-    }
-  });
-
-  app.post("/api/wallet/withdraw", async (req, res) => {
-    const { uid, amount, asset, walletAddress } = req.body;
-    if (!db || !uid || !amount || !asset || !walletAddress) {
-      return res.status(400).json({ error: "Invalid request" });
-    }
-
-    try {
-      const userRef = db.collection("users").doc(uid);
-      const userDoc = await userRef.get();
-      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-
-      const userData = userDoc.data();
-      const currentWalletBalance = userData.walletBalance || 0;
-
-      if (amount > currentWalletBalance) {
-        return res.status(400).json({ error: "Insufficient wallet balance" });
-      }
-
-      // Update Firestore
-      await userRef.update({
-        walletBalance: currentWalletBalance - amount
-      });
-
-      // Real On-Chain Transfer (Simulated for demo, but structured for real Sui)
-      let txHash = "0x" + Math.random().toString(16).slice(2);
-      let onChainError = null;
-
-      if (process.env.SUI_PRIVATE_KEY) {
-        try {
-          const secretKey = fromHex(process.env.SUI_PRIVATE_KEY.replace("0x", ""));
-          const keypair = Ed25519Keypair.fromSecretKey(secretKey);
-          const txb = new Transaction();
-          
-          // In a real app, we'd transfer the actual USDT/USDC from Treasury to User
-          // For the demo, we'll do a small SUI transfer to show real blockchain interaction
-          if (walletAddress && walletAddress.startsWith("0x")) {
-            const [coin] = txb.splitCoins(txb.gas, [1000000]); // 0.001 SUI
-            txb.transferObjects([coin], walletAddress);
-            
-            const result = await suiClient.signAndExecuteTransaction({
-              signer: keypair,
-              transaction: txb,
-            });
-            txHash = result.digest;
-          }
-        } catch (e: any) {
-          console.error("On-chain withdrawal failed:", e);
-          onChainError = e.message;
-        }
-      }
-
-      // Add notification
-      await db.collection("notifications").add({
-        uid,
-        type: "WITHDRAWAL",
-        title: "Withdrawal Successful",
-        message: `Successfully withdrawn ${amount.toFixed(2)} ${asset} to your on-chain wallet.`,
-        amount: -amount,
-        asset,
-        timestamp: new Date().toISOString(),
-        read: false
-      });
-
-      res.json({ success: true, txHash, onChainError });
-    } catch (error: any) {
-      console.error("Withdrawal error:", error);
-      res.status(500).json({ error: error.message });
     }
   });
 
