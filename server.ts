@@ -193,12 +193,12 @@ async function processBackgroundTrades() {
       const strategy = userData.activeStrategy || "Momentum";
       
       // Simulate a small profit/loss per minute
-      let profitFactor = 0.0001; // Base 0.01% per minute
+      let profitFactor = 0.001; // Base 0.1% per update
       switch (strategy) {
-        case "Aggressive": profitFactor = 0.0005; break;
-        case "Momentum": profitFactor = 0.0002; break;
-        case "Scalping": profitFactor = 0.0001; break;
-        case "Conservative": profitFactor = 0.00005; break;
+        case "Aggressive": profitFactor = 0.005; break;
+        case "Momentum": profitFactor = 0.002; break;
+        case "Scalping": profitFactor = 0.001; break;
+        case "Conservative": profitFactor = 0.0005; break;
       }
       
       const tradingAsset = userData.tradingAsset || "USDT";
@@ -217,7 +217,7 @@ async function processBackgroundTrades() {
       });
       
       // Occasionally create a trade record
-      if (Math.random() < 0.2) {
+      if (Math.random() < 0.5) {
         const tradeRef = db.collection("trades").doc();
         const tradeAmount = Math.abs(actualProfit) * 10;
         batch.set(tradeRef, {
