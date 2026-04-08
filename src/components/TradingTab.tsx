@@ -51,13 +51,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     const tradesRef = collection(db, "trades");
     const q = query(
       tradesRef,
-      where("uid", "==", user.uid),
       orderBy("timestamp", "desc"),
-      limit(200)
+      limit(500)
     );
 
     const unsubscribeTrades = onSnapshot(q, (snapshot) => {
-      const trades = snapshot.docs.map(doc => ({
+      const allTrades = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         time: new Date(doc.data().timestamp).toLocaleString(undefined, { 
@@ -67,47 +66,26 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           minute: '2-digit' 
         }),
         value: doc.data().pnl
-      })).reverse();
+      }));
+
+      const userTrades = allTrades.filter((t: any) => t.uid === user.uid).reverse();
       
       // If we have trades, use them for the chart. 
-      // Otherwise, create some dummy data based on current PnL
-      if (trades.length > 0) {
-        setHistory(trades);
+      if (userTrades.length > 0) {
+        setHistory(userTrades);
       } else {
         setHistory([{ time: "Start", value: 0 }]);
       }
+
+      // Also update global activity from the same snapshot to be efficient
+      setGlobalActivity(allTrades.slice(0, 200));
     }, (error) => {
-      // Don't throw for history fetch errors, just log
       console.error("Error fetching trade history:", error);
-    });
-
-    // Global activity feed
-    const globalQ = query(
-      collection(db, "trades"),
-      orderBy("timestamp", "desc"),
-      limit(200)
-    );
-
-    const unsubscribeGlobal = onSnapshot(globalQ, (snapshot) => {
-      const trades = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        time: new Date(doc.data().timestamp).toLocaleString(undefined, { 
-          month: 'short', 
-          day: 'numeric', 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        }),
-      }));
-      setGlobalActivity(trades);
-    }, (error) => {
-      console.error("Error fetching global trade history:", error);
     });
 
     return () => {
       unsubscribeUser();
       unsubscribeTrades();
-      unsubscribeGlobal();
     };
   }, [user]);
 
@@ -613,7 +591,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             <div className="flex items-center justify-between mb-4 md:mb-6">
               <h3 className="text-base md:text-xl font-bold tracking-tight flex items-center gap-2">
                 <Activity size={18} className="text-orange-500 md:w-5 md:h-5" />
-                <span>Global Activity Feed</span>
+                <span>Trade Activity Feed</span>
               </h3>
               <div className="text-[9px] md:text-xs text-white/40 bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10">
                 Live Updates
