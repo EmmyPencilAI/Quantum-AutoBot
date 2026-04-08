@@ -28,9 +28,18 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [withdrawAddress, setWithdrawAddress] = useState("");
   const [withdrawAsset, setWithdrawAsset] = useState("USDT");
 
-  // Sync with Firestore
+  // Sync with Firestore (or use local state in demo mode)
   useEffect(() => {
     if (!user) return;
+    
+    const isDemoMode = import.meta.env.VITE_MODE === "demo";
+    
+    if (isDemoMode) {
+      // Demo mode: Use local state only
+      console.log("Demo mode enabled - using local state only");
+      return;
+    }
+    
     const userRef = doc(db, "users", user.uid);
     const unsubscribeUser = onSnapshot(userRef, (doc) => {
       if (doc.exists()) {
@@ -153,6 +162,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           setLoading(false);
           return;
         }
+        if (!db) {
+          toast.error("Firestore not available. Please check your connection.", { id: "settle" });
+          setLoading(false);
+          return;
+        }
         await updateDoc(userRef, {
           isTrading: true,
           activeStrategy: strategy,
@@ -233,6 +247,19 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     setLoading(true);
     toast.loading("Processing funding...", { id: "fund" });
     try {
+      const isDemoMode = import.meta.env.VITE_MODE === "demo";
+      
+      if (isDemoMode) {
+        // Demo mode: Just update local state
+        setInitialInvestment(amount);
+        setIsTrading(true);
+        setWalletBalance(Math.max(0, walletBalance - amount));
+        toast.success(`Successfully funded ${amount} ${tradingAsset}!`, { id: "fund" });
+        setFundAmount("0");
+        setLoading(false);
+        return;
+      }
+      
       if (amount <= walletBalance) {
         // 1. Fund from internal wallet (Firestore only)
         console.log(`Funding ${amount} from internal wallet...`);
@@ -320,28 +347,52 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const changeStrategy = async (newStrategy: string) => {
     if (!user || isTrading) return;
     setStrategy(newStrategy);
+    
+    const isDemoMode = import.meta.env.VITE_MODE === "demo";
+    if (isDemoMode) {
+      toast.success(`Strategy changed to ${newStrategy}`, { id: "strategy-change" });
+      return;
+    }
+    
     try {
+      if (!db) {
+        toast.error("Firestore not available", { id: "strategy-change" });
+        return;
+      }
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
         activeStrategy: newStrategy
       });
+      toast.success(`Strategy changed to ${newStrategy}`, { id: "strategy-change" });
     } catch (e: any) {
       console.error("Strategy change failed:", e);
-      alert("Strategy change failed: " + (e.message || "Unknown error"));
+      toast.error("Strategy change failed", { id: "strategy-change" });
     }
   };
 
   const changePair = async (newPair: string) => {
     if (!user || isTrading) return;
     setSelectedPair(newPair);
+    
+    const isDemoMode = import.meta.env.VITE_MODE === "demo";
+    if (isDemoMode) {
+      toast.success(`Pair changed to ${newPair}`, { id: "pair-change" });
+      return;
+    }
+    
     try {
+      if (!db) {
+        toast.error("Firestore not available", { id: "pair-change" });
+        return;
+      }
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
         activePair: newPair
       });
+      toast.success(`Pair changed to ${newPair}`, { id: "pair-change" });
     } catch (e: any) {
       console.error("Pair change failed:", e);
-      alert("Pair change failed: " + (e.message || "Unknown error"));
+      toast.error("Pair change failed", { id: "pair-change" });
     }
   };
 
