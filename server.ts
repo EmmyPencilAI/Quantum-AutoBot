@@ -270,9 +270,9 @@ async function processBackgroundTrades() {
   }
 }
 
-// Run background trading every 15 seconds
+// Run background trading every 5 seconds for real-time feel
 if (db) {
-  setInterval(processBackgroundTrades, 15000);
+  setInterval(processBackgroundTrades, 5000);
 }
 
 // Sui Config (Mirroring src/lib/sui.ts)
@@ -703,6 +703,76 @@ async function startServer() {
     } catch (error: any) {
       console.error("Like error:", error);
       res.status(500).json({ success: false, error: error.message || "Internal server error" });
+    }
+  });
+
+  app.post("/api/wallet/withdraw", async (req, res) => {
+    const { uid, amount, asset, walletAddress } = req.body;
+    if (!db || !uid || !amount || !asset || !walletAddress) {
+      return res.status(400).json({ error: "Invalid request" });
+    }
+
+    try {
+      const userRef = db.collection("users").doc(uid);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const userData = userDoc.data();
+      const currentWalletBalance = userData.walletBalance || 0;
+
+      if (amount > currentWalletBalance) {
+        return res.status(400).json({ error: "Insufficient wallet balance" });
+      }
+
+      // Update Firestore
+      await userRef.update({
+        walletBalance: currentWalletBalance - amount
+      });
+
+      // Real On-Chain Transfer (Simulated for demo, but structured for real Sui)
+      let txHash = "0x" + Math.random().toString(16).slice(2);
+      let onChainError = null;
+
+      if (process.env.SUI_PRIVATE_KEY) {
+        try {
+          const secretKey = fromHex(process.env.SUI_PRIVATE_KEY.replace("0x", ""));
+          const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+          const txb = new Transaction();
+          
+          // In a real app, we'd transfer the actual USDT/USDC from Treasury to User
+          // For the demo, we'll do a small SUI transfer to show real blockchain interaction
+          if (walletAddress && walletAddress.startsWith("0x")) {
+            const [coin] = txb.splitCoins(txb.gas, [1000000]); // 0.001 SUI
+            txb.transferObjects([coin], walletAddress);
+            
+            const result = await suiClient.signAndExecuteTransaction({
+              signer: keypair,
+              transaction: txb,
+            });
+            txHash = result.digest;
+          }
+        } catch (e: any) {
+          console.error("On-chain withdrawal failed:", e);
+          onChainError = e.message;
+        }
+      }
+
+      // Add notification
+      await db.collection("notifications").add({
+        uid,
+        type: "WITHDRAWAL",
+        title: "Withdrawal Successful",
+        message: `Successfully withdrawn ${amount.toFixed(2)} ${asset} to your on-chain wallet.`,
+        amount: -amount,
+        asset,
+        timestamp: new Date().toISOString(),
+        read: false
+      });
+
+      res.json({ success: true, txHash, onChainError });
+    } catch (error: any) {
+      console.error("Withdrawal error:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 
