@@ -7,7 +7,8 @@ import dotenv from "dotenv";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
-import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
+import { BaseClient } from "@mysten/sui/client";
+import { getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey as decodeSuiPrivateKeySDK } from "@mysten/sui/cryptography";
@@ -27,7 +28,7 @@ function decodeSuiPrivateKey(key: string): Uint8Array {
 }
 
 // Sui Client for Backend
-const suiClient = new SuiClient({ url: getFullnodeUrl("testnet") });
+const suiClient = new BaseClient({ url: getJsonRpcFullnodeUrl("testnet") });
 
 // Load Firebase Config
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
