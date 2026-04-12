@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
-import { buildTransferOnChainPTB, buildStartSessionPTB, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
+import { buildTransferOnChainPTB, buildStartSessionPTB, buildWithdrawSessionPTB, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
 import { buildPTBFromTradeInstruction } from "../lib/tradeInstructions";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useInitExecutionAdapter } from "../lib/executionAdapter";
@@ -26,6 +26,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [fundAmount, setFundAmount] = useState("0");
   
   const [tradingAsset, setTradingAsset] = useState("USDT");
+  const [tradingSessionId, setTradingSessionId] = useState<string | null>(null);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawAddress, setWithdrawAddress] = useState("");
@@ -50,6 +51,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setInitialInvestment(data.initialInvestment || 0);
         
         setTradingAsset(data.tradingAsset || "USDT");
+        if (data.tradingSessionId) setTradingSessionId(data.tradingSessionId);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -114,9 +116,30 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           setInitialInvestment(0);
           toast.success("Trading stopped! Demo mode.", { id: "settle" });
         } else {
+          if (!tradingSessionId) {
+            toast.error("Trading session ID not found. Resetting state...", { id: "settle" });
+            const userRef = doc(db, "users", user.uid);
+            await updateDoc(userRef, {
+              isTrading: false,
+              initialInvestment: 0,
+              totalProfit: 0,
+              tradingSessionId: null,
+              suiWallet: "Pending Web3 Wallet" // Retroactive fix allowing firestore rules to pass
+            });
+            setIsTrading(false);
+            setLoading(false);
+            return;
+          }
+
           toast.loading("Settling trades on-chain...", { id: "settle" });
           
+          // Execute on-chain withdrawal
+          const tx = buildWithdrawSessionPTB(tradingSessionId);
+          const txResult = await executionAdapter.executeTransaction(tx);
           
+          if (!txResult) {
+            throw new Error("On-chain settlement failed or was rejected");
+          }
           
           const response = await fetch("/api/trading/settle", {
             method: "POST",

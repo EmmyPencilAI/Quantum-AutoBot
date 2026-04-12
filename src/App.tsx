@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { auth, googleProvider, facebookProvider, appleProvider, db, handleFirestoreError, OperationType } from "./firebase";
 import { onAuthStateChanged, signInWithPopup } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { TrendingUp, Shield, Globe, Zap, ArrowRight, Chrome, Facebook, Apple } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Layout from "./components/Layout";
@@ -54,7 +54,7 @@ const App: React.FC = () => {
                 uid: user.uid,
                 displayName: user.displayName || "Quantum Trader",
                 avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-                suiWallet: null, // No longer generating keypair
+                  suiWallet: "Pending Web3 Wallet", // No longer generating keypair, but firestore rules demand a string
                 suiBalance: 0,
                 walletBalance: 0, // Starting wallet balance
                 usdtBalance: 0, 
@@ -65,6 +65,24 @@ const App: React.FC = () => {
                 region: "Global",
                 createdAt: new Date().toISOString(),
               });
+            } else {
+              const userData = userSnap.data();
+              const updates: any = {};
+              
+              if (!userData?.suiWallet) updates.suiWallet = "Pending Web3 Wallet";
+              
+              if (userData?.isTrading === true && !userData?.tradingSessionId) {
+                updates.isTrading = false;
+              }
+              
+              if (Object.keys(updates).length > 0) {
+                console.log("Applying retroactive fix to corrupted user profile...", updates);
+                try {
+                  await updateDoc(userRef, updates);
+                } catch (err) {
+                  console.error("Failed to retroactively fix user profile:", err);
+                }
+              }
             }
             setUser(user);
           } catch (error) {

@@ -197,3 +197,18 @@ export async function buildStartSessionPTB(params: {
   return txb;
 }
 
+export function buildWithdrawSessionPTB(sessionId: string): Transaction {
+  const txb = new Transaction();
+  
+  txb.moveCall({
+    target: `${SUI_CONTRACT_ADDRESS}::trading::withdraw_session`,
+    arguments: [
+      txb.object(sessionId),
+      txb.object(SUI_TREASURY_ADDRESS),
+    ],
+  });
+
+  txb.setGasBudget(10000000); // 0.01 SUI
+  return txb;
+}
+
