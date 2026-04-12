@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
-import { deriveSuiWallet, buildTransferOnChainPTB, buildStartSessionPTB, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
+import { buildTransferOnChainPTB, buildStartSessionPTB, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
 import { buildPTBFromTradeInstruction } from "../lib/tradeInstructions";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useInitExecutionAdapter } from "../lib/executionAdapter";
@@ -24,7 +24,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [fundAmount, setFundAmount] = useState("0");
-  const [walletBalance, setWalletBalance] = useState(0);
+  
   const [tradingAsset, setTradingAsset] = useState("USDT");
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
@@ -32,15 +32,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [withdrawAsset, setWithdrawAsset] = useState("USDT");
 
   const currentAccount = useCurrentAccount(); // Added for UI/Execution isolation
-  const executionAdapter = useInitExecutionAdapter(user);
+  const executionAdapter = useInitExecutionAdapter();
 
-  // ==== UNIFIED WALLET LAYER (STEP 3.3) ====
-  const executionWallet = useMemo(() => user ? deriveSuiWallet(user.uid) : null, [user]);
-  const walletLayer = {
-    uiWallet: currentAccount,
-    executionWallet: executionWallet!,
-  };
-  // ==========================================
+  
 
   // Sync with Firestore
   useEffect(() => {
@@ -54,7 +48,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setSelectedPair(data.activePair || "BTC / USDT");
         setPnl(data.totalProfit || 0);
         setInitialInvestment(data.initialInvestment || 0);
-        setWalletBalance(data.walletBalance || 0);
+        
         setTradingAsset(data.tradingAsset || "USDT");
       }
     }, (error) => {
@@ -122,20 +116,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         } else {
           toast.loading("Settling trades on-chain...", { id: "settle" });
           
-          // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
-          const executionWallet = walletLayer.executionWallet;
-          const executionAddress = executionWallet.toSuiAddress();
-          const UIWallet = walletLayer.uiWallet?.address || "None";
           
-          console.log(`[EXECUTION: SETTLE] Stopping trades...`);
-          console.log(`[EXECUTION: SETTLE] Connected/UI Wallet: ${UIWallet}`);
-          console.log(`[EXECUTION: SETTLE] Sending Legacy Exec Address to API: ${executionAddress}`);
-          // ================================================
           
           const response = await fetch("/api/trading/settle", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ uid: user.uid, walletAddress: executionAddress })
+            body: JSON.stringify({ uid: user.uid, walletAddress: currentAccount?.address })
           });
           if (!response.ok) {
             const text = await response.text();
@@ -204,7 +190,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       return;
     }
 
-    if (amount > walletBalance) {
+    if (false) {
       toast.error("Insufficient wallet balance");
       return;
     }
@@ -217,7 +203,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       
       if (isDemoMode) {
         // Demo mode: Just update local state
-        setWalletBalance(walletBalance - amount);
+        
         toast.success("Withdrawal successful! (Demo mode)", { id: "withdraw" });
         setShowWithdrawModal(false);
         setWithdrawAmount("");
@@ -256,7 +242,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   };
 
   const fundTrading = async () => {
-    if (!user || isTrading) return;
+    if (!user || isTrading || !currentAccount) {
+      if (!currentAccount) toast.error("Wallet not connected");
+      return;
+    }
     const amount = parseFloat(fundAmount);
     if (isNaN(amount) || amount <= 0) {
       toast.error("Please enter a valid amount to fund.");
@@ -264,38 +253,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     }
 
     setLoading(true);
-    toast.loading("Processing funding...", { id: "fund" });
+    toast.loading("Processing on-chain funding...", { id: "fund" });
     try {
-      if (amount <= walletBalance) {
-        // 1. Fund from internal wallet (Firestore only)
-        console.log(`Funding ${amount} from internal wallet...`);
-        const userRef = doc(db, "users", user.uid);
-        const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
-        await updateDoc(userRef, {
-          isTrading: true,
-          initialInvestment: amount,
-          [balanceField]: amount,
-          walletBalance: walletBalance - amount,
-          tradingAsset: tradingAsset,
-          activeStrategy: strategy,
-          activePair: selectedPair,
-          totalProfit: 0
-        });
-
-        toast.success(`Successfully funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
-      } else {
-        // 2. Fund from on-chain (requires transfer to treasury or contract)
-        
-        // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
-        const executionWallet = walletLayer.executionWallet;
-        const executionAddress = executionWallet.toSuiAddress();
-        const UIWallet = walletLayer.uiWallet?.address || "None";
-        
-        console.log(`[EXECUTION: FUND] Initializing funding check...`);
-        console.log(`[EXECUTION: FUND] Display/Connected Wallet: ${UIWallet}`);
-        console.log(`[EXECUTION: FUND] Funding from Legacy Execution Wallet: ${executionAddress}`);
-        // ================================================
-
+        const executionAddress = currentAccount.address;
         const balances = await getAllBalances(executionAddress);
         
         let currentOnChainBalance = 0;
@@ -304,7 +264,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         else currentOnChainBalance = balances.usdt;
 
         if (amount > currentOnChainBalance) {
-          toast.error(`Insufficient balance. You have ${walletBalance.toFixed(2)} in internal wallet and ${currentOnChainBalance.toFixed(2)} on-chain.`, { id: "fund" });
+          toast.error(`Insufficient on-chain balance. You have ${currentOnChainBalance.toFixed(2)} ${tradingAsset}.`, { id: "fund" });
           setLoading(false);
           return;
         }
@@ -318,9 +278,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         console.log(`Funding ${amount} from on-chain...`);
         let sessionId = null;
 
-        // =========================================================================
-        // STEP 4.3: Architecture Alignment - Backend orchestration pipeline
-        // =========================================================================
         const actionType = tradingAsset === "SUI" ? "START_SESSION" : "DEPOSIT";
         
         // 1. AI Decision happens backend via API Intent
@@ -343,11 +300,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         
         const { instruction } = await intentRes.json();
         
-        // 2. Build the exact PTB via Frontend mapping using the Dapp Wallet OR execution wallet
-        const senderAddress = walletLayer.uiWallet?.address || executionWallet!.toSuiAddress();
+        // 2. Build the exact PTB via Frontend mapping using the connected Wallet
+        const senderAddress = currentAccount.address;
         const tx = await buildPTBFromTradeInstruction(instruction, senderAddress);
 
-        // 3. Wallet Signing Gateway (execute through executionAdapter layer using connected Dapp-Kit UI)
+        // 3. User Signs and Executes Transaction (100% Non-Custodial)
         const result = await executionAdapter.executeTransaction(tx);
 
         // Optional logic for Move Call session IDs extraction
@@ -361,7 +318,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           if (!sessionObject || !("objectId" in sessionObject)) {
             throw new Error("TradingSession object not found in transaction results");
           }
-          sessionId = sessionObject.objectId as string;
+          sessionId = sessionObject.objectId;
         }
 
         // 4. Sync Result Back to Backend
@@ -375,7 +332,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             success: true
           })
         });
-        // =========================================================================
 
         const userRef = doc(db, "users", user.uid);
         const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
@@ -387,11 +343,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           activeStrategy: strategy,
           activePair: selectedPair,
           totalProfit: 0,
-          tradingSessionId: sessionId // Store the session ID if it exists
+          tradingSessionId: sessionId
         });
 
-        toast.success(`Successfully funded ${amount} ${tradingAsset} from on-chain!`, { id: "fund" });
-      }
+        toast.success(`Successfully funded ${amount} ${tradingAsset} securely on-chain!`, { id: "fund" });
       setFundAmount("0");
     } catch (e: any) {
       console.error("Funding failed:", e);
@@ -401,7 +356,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     }
   };
 
-  const changeStrategy = async (newStrategy: string) => {
+const changeStrategy = async (newStrategy: string) => {
     if (!user || isTrading) return;
     setStrategy(newStrategy);
     try {
@@ -438,24 +393,16 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       
       if (isDemoMode) {
         // Demo mode: Just move profit to wallet balance
-        setWalletBalance(walletBalance + pnl);
+        
         setPnl(0);
         toast.success(`Successfully withdrawn ${pnl.toFixed(2)} to wallet balance! (Demo mode)`, { id: "withdraw-profit" });
       } else {
-          // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
-          const executionWallet = walletLayer.executionWallet;
-          const executionAddress = executionWallet.toSuiAddress();
-          const UIWallet = walletLayer.uiWallet?.address || "None";
           
-          console.log(`[EXECUTION: WITHDRAW] Initializing withdrawal check...`);
-          console.log(`[EXECUTION: WITHDRAW] Display/Connected Wallet: ${UIWallet}`);
-          console.log(`[EXECUTION: WITHDRAW] Withdrawing to Legacy Execution Wallet: ${executionAddress}`);
-          // ================================================
 
           const response = await fetch("/api/trading/withdraw-profit", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ uid: user.uid, walletAddress: executionAddress })
+            body: JSON.stringify({ uid: user.uid, walletAddress: currentAccount?.address })
           });
 
         const result = await response.json();
@@ -571,7 +518,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             </button>
           </div>
           <p className="text-[10px] text-white/40">
-            Wallet Balance: <span className="text-blue-400 font-bold">{walletBalance.toFixed(2)} USD</span>
+            Connected: <span className="text-blue-400 font-bold">{currentAccount ? 'Yes' : 'No'}</span>
           </p>
           <p className="text-[10px] text-white/40">
             Trading Balance: <span className="text-green-400 font-bold">{(initialInvestment + pnl).toFixed(2)} {tradingAsset}</span>
@@ -795,13 +742,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white font-bold focus:outline-none focus:border-orange-500/50 transition-all"
                     />
                     <button 
-                      onClick={() => setWithdrawAmount(walletBalance.toString())}
+                      onClick={() => setWithdrawAmount("0")}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-orange-500 hover:text-orange-400"
                     >
                       MAX
                     </button>
                   </div>
-                  <p className="text-[10px] text-white/40 mt-1">Available: {walletBalance.toFixed(2)} USD</p>
+                  <p className="text-[10px] text-white/40 mt-1">Smart Contract Balance Enforced</p>
                 </div>
 
                 <div>

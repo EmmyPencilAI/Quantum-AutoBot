@@ -11,7 +11,6 @@ import TradingTab from "./components/TradingTab";
 import LeaderboardTab from "./components/LeaderboardTab";
 import CommunityTab from "./components/CommunityTab";
 import SettingsTab from "./components/SettingsTab";
-import { deriveSuiWallet } from "./lib/sui";
 
 import ErrorBoundary from "./components/ErrorBoundary";
 import { Toaster } from "sonner";
@@ -51,12 +50,11 @@ const App: React.FC = () => {
             
             if (!userSnap.exists()) {
               console.log("Creating new user profile...");
-              const keypair = deriveSuiWallet(user.uid);
               await setDoc(userRef, {
                 uid: user.uid,
                 displayName: user.displayName || "Quantum Trader",
                 avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-                suiWallet: keypair.toSuiAddress(),
+                suiWallet: null, // No longer generating keypair
                 suiBalance: 0,
                 walletBalance: 0, // Starting wallet balance
                 usdtBalance: 0, 

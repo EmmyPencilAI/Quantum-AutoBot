@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
 import { motion } from "motion/react";
-import { deriveSuiWallet, getAllBalances, buildTransferOnChainPTB, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
+import { getAllBalances, buildTransferOnChainPTB, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { Bell, CheckCircle2, Info, AlertCircle, Link } from "lucide-react";
@@ -44,22 +44,13 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const assets = ["SUI", "USDT", "USDC"];
 
   const currentAccount = useCurrentAccount(); // UI Wallet
-  const executionAdapter = useInitExecutionAdapter(user);
+  const executionAdapter = useInitExecutionAdapter();
   
-  // ==== UNIFIED WALLET LAYER (STEP 3.3) ====
-  const executionWallet = useMemo(() => user ? deriveSuiWallet(user.uid) : null, [user]);
-  const walletLayer = {
-    uiWallet: currentAccount,
-    executionWallet: executionWallet!,
-  };
-  // ==========================================
+  
 
   useEffect(() => {
-    if (user && walletLayer.executionWallet) {
-      const legacyAddr = walletLayer.executionWallet.toSuiAddress();
-      
-      // Fallback Display Logic
-      const activeAddress = walletLayer.uiWallet?.address || legacyAddr;
+    if (user && currentAccount?.address) {
+      const activeAddress = currentAccount.address;
       setAddress(activeAddress);
       refreshBalances(activeAddress);
 
@@ -121,15 +112,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     setSending(true);
     toast.loading("Sending transaction...", { id: "send" });
     try {
-      // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
-      const executionWallet = walletLayer.executionWallet;
-      const executionAddress = executionWallet.toSuiAddress();
-      const UIWallet = walletLayer.uiWallet?.address || "None";
       
-      console.log(`[EXECUTION: SEND] Target: ${sendParams.recipient}`);
-      console.log(`[EXECUTION: SEND] Display/Connected Wallet: ${UIWallet}`);
-      console.log(`[EXECUTION: SEND] Selected Execution Wallet (Legacy): ${executionAddress}`);
-      // ================================================
 
       let coinType = USDT_TYPE;
       if (sendParams.asset === "SUI") coinType = SUI_TYPE;
@@ -140,7 +123,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         throw new Error(`Cross-chain transfer to ${sendParams.chain} is not supported in this version. Only Sui-to-Sui transfers are currently active.`);
       }
 
-      const senderAddress = walletLayer.uiWallet?.address || executionWallet.toSuiAddress();
+      const senderAddress = currentAccount?.address || executionWallet.toSuiAddress();
       const tx = await buildTransferOnChainPTB({
         senderAddress,
         to: sendParams.recipient,
@@ -178,15 +161,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     setToppingUp(true);
     toast.loading("Verifying execution balances...", { id: "deposit" });
     try {
-      // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
-      const executionWallet = walletLayer.executionWallet;
-      const executionAddress = executionWallet.toSuiAddress();
-      const UIWallet = walletLayer.uiWallet?.address || "None";
       
-      console.log(`[EXECUTION: DEPOSIT] Connecting funding stream...`);
-      console.log(`[EXECUTION: DEPOSIT] Display/Connected Wallet: ${UIWallet}`);
-      console.log(`[EXECUTION: DEPOSIT] Selected Execution Wallet (Legacy): ${executionAddress}`);
-      // ================================================
       
       // Execute from the execution wallet as the single source of truth
       const execBalances = await getAllBalances(executionAddress);
@@ -204,7 +179,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       
       if (usdtAmount > 0) {
         console.log(`Depositing ${usdtAmount} USDT from on-chain...`);
-        const senderAddress = walletLayer.uiWallet?.address || executionWallet.toSuiAddress();
+        const senderAddress = currentAccount?.address || executionWallet.toSuiAddress();
         const tx = await buildTransferOnChainPTB({
           senderAddress,
           to: SUI_TREASURY_ADDRESS,
@@ -216,7 +191,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       
       if (usdcAmount > 0) {
         console.log(`Depositing ${usdcAmount} USDC from on-chain...`);
-        const senderAddress = walletLayer.uiWallet?.address || executionWallet.toSuiAddress();
+        const senderAddress = currentAccount?.address || executionWallet.toSuiAddress();
         const tx = await buildTransferOnChainPTB({
           senderAddress,
           to: SUI_TREASURY_ADDRESS,
@@ -269,15 +244,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     setWithdrawing(true);
     toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
-      // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
-      const executionWallet = walletLayer.executionWallet;
-      const executionAddress = executionWallet.toSuiAddress();
-      const UIWallet = walletLayer.uiWallet?.address || "None";
       
-      console.log(`[EXECUTION: WITHDRAW] Initializing external withdrawal...`);
-      console.log(`[EXECUTION: WITHDRAW] Display/Connected Wallet: ${UIWallet}`);
-      console.log(`[EXECUTION: WITHDRAW] Default Withdrawal Wallet (Legacy Execution): ${executionAddress}`);
-      // ================================================
 
       const response = await fetch("/api/wallet/withdraw", {
         method: "POST",

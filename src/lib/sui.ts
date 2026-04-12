@@ -18,15 +18,7 @@ export const SUI_TYPE = "0x2::sui::SUI";
 // Platform Fee Configuration
 export const PLATFORM_FEE_PERCENT = 0.001; // 0.1% - "cheap" but collected
 
-/**
- * Simplified zkLogin wallet derivation for the AI Studio environment.
- */
-export function deriveSuiWallet(uid: string): Ed25519Keypair {
-  // Use a deterministic seed from the UID
-  const encoder = new TextEncoder();
-  const seed = encoder.encode(uid.padEnd(32, "0")).slice(0, 32);
-  return Ed25519Keypair.fromSecretKey(seed);
-}
+
 
 /**
  * Request gas from Sui Testnet Faucet
