@@ -49,11 +49,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setStrategy(data.activeStrategy || "Momentum");
         setSelectedPair(data.activePair || "BTC / USDT");
         setPnl(data.totalProfit || 0);
-        setInitialInvestment(data.initialInvestment || 0);
-          setWalletBalance(data.walletBalance || 0);
-        
-        setTradingAsset(data.tradingAsset || "USDT");
-        if (data.tradingSessionId) setTradingSessionId(data.tradingSessionId);
+          setInitialInvestment(data.isTrading ? (data.initialInvestment || 0) : 0);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -215,73 +211,69 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       return;
     }
 
-      setLoading(true);
-      toast.loading("Processing withdrawal...", { id: "withdraw" });
-  
-      try {
-        const userRef = doc(db, "users", user.uid);
-        
-        // Use an onSnapshot or getDoc to check the balance in Firestore
-        // For security and simplicity, we just debit it locally.
-        try {
-          const { getDoc } = await import("firebase/firestore");
-          const userDoc = await getDoc(userRef);
-          if (userDoc.exists()) {
-             const data = userDoc.data();
-             const currentBalance = data.walletBalance || 0;
-             if (amount > currentBalance) {
-                toast.error("Insufficient wallet balance", { id: "withdraw" });
-                setLoading(false);
-                return;
-             }
-             
-             await updateDoc(userRef, {
-                 walletBalance: currentBalance - amount
-             });
-          }
-        } catch (e) {
-             console.error("Balance check failed", e);
-             toast.error("Failed to check balance", { id: "withdraw" });
-             setLoading(false);
-             return;
-        }
+    setLoading(true);
+    toast.loading("Processing withdrawal...", { id: "withdraw" });
 
-        const isDemoMode = import.meta.env.VITE_MODE === "demo";
-        
-        if (isDemoMode) {
-          toast.success("Withdrawal successful! (Demo mode)", { id: "withdraw" });
-        } else {
-          try {
-            const response = await fetch("/api/wallet/withdraw", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                uid: user.uid,
-                amount,
-                asset: withdrawAsset,
-                walletAddress: withdrawAddress
-              })
-            });
-    
-            if (!response.ok) {
-              console.warn("Backend withdrawal failed, falling back to database update");
-            }
-          } catch (e) {
-            console.warn("Backend withdrawal not reachable, used direct database update.");
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const isDemoMode = import.meta.env.VITE_MODE === "demo";
+      
+      let currentBalance = 0;
+      try {
+        const { getDoc } = await import("firebase/firestore");
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists()) {
+           const data = userDoc.data();
+           currentBalance = data.walletBalance || 0;
+           if (amount > currentBalance) {
+              toast.error("Insufficient wallet balance", { id: "withdraw" });
+              setLoading(false);
+              return;
+           }
+        }
+      } catch (e) {
+           console.error("Balance check failed", e);
+           toast.error("Failed to check balance", { id: "withdraw" });
+           setLoading(false);
+           return;
+      }
+
+      if (isDemoMode) {
+        toast.success("Withdrawal successful! (Demo mode)", { id: "withdraw" });
+      } else {
+        try {
+          const response = await fetch("/api/wallet/withdraw", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              uid: user.uid,
+              amount,
+              asset: withdrawAsset,
+              walletAddress: withdrawAddress
+            })
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || "Backend withdrawal failed.");
           }
           
           toast.success("Withdrawal successfully submitted to network!", { id: "withdraw" });
+        } catch (e: any) {
+          console.error("Withdrawal error:", e);
+          toast.error(e.message || "Withdrawal failed on the network.", { id: "withdraw" });
         }
-        
-        setShowWithdrawModal(false);
-        setWithdrawAmount("");
-      } catch (error: any) {
-        console.error("Withdrawal failed:", error);
-        toast.error(error.message || "Withdrawal failed", { id: "withdraw" });
-      } finally {
-        setLoading(false);
       }
-    };
+      
+      setShowWithdrawModal(false);
+      setWithdrawAmount("");
+    } catch (error: any) {
+      console.error("Withdrawal failed:", error);
+      toast.error(error.message || "Withdrawal failed", { id: "withdraw" });
+    } finally {
+      setLoading(false);
+    }
+  };
 
     const fundTrading = async () => {
       if (!user || isTrading || !currentAccount) {
@@ -467,11 +459,7 @@ const changeStrategy = async (newStrategy: string) => {
             if (result.success) {
                toast.success(`Successfully withdrawn ${result.withdrawn?.toFixed(2)} to wallet balance!`, { id: "withdraw-profit" });
             }
-          } catch(e) {
-            console.warn("Backend unavailable, used direct DB fallback.");
-            toast.success("Successfully withdrawn to wallet balance!", { id: "withdraw-profit" });
-            }
-          }
+          } catch(e: any) { console.error("Backend failed:", e); toast.error(e.message || "Backend failed", { id: "withdraw-profit" }); } }
       } catch (e: any) {
         console.error("Profit withdrawal failed:", e);
         toast.error(e.message || "Withdrawal failed", { id: "withdraw-profit" });

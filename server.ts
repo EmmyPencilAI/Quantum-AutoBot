@@ -363,21 +363,24 @@ async function startServer() {
         return res.status(400).json({ error: "Insufficient trading wallet balance" });
       }
 
-      // 1. Update Firestore first (Optimistic or Lock)
+      // 1. Ensure system has real treasury keys before deducting DB balance
+      if (!process.env.SUI_PRIVATE_KEY) {
+        return res.status(400).json({ error: "System treasury is not configured. Real on-chain withdrawals are currently disabled." });
+      }
+
+      // 2. Update Firestore first (Optimistic or Lock)
       const newWalletBalance = currentWalletBalance - amount;
       await userRef.update({
         walletBalance: newWalletBalance
       });
 
-      // 2. Perform On-Chain Transfer from Treasury to User
+      // 3. Perform On-Chain Transfer from Treasury to User
       let txHash = "0x" + Math.random().toString(16).slice(2);
       let onChainError = null;
-      let isSimulated = true;
+      let isSimulated = false;
 
-      if (process.env.SUI_PRIVATE_KEY) {
-        try {
-          isSimulated = false;
-          console.log(`Attempting REAL on-chain withdrawal for ${walletAddress} on Sui...`);
+      try {
+        console.log(`Attempting REAL on-chain withdrawal for ${walletAddress} on Sui...`);
           const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
           const keypair = Ed25519Keypair.fromSecretKey(secretKey);
           const txb = new Transaction();
@@ -445,7 +448,6 @@ async function startServer() {
           });
           return res.status(500).json({ error: "On-chain transfer failed. Balance rolled back." });
         }
-      }
 
       // Create notification
       await db.collection("notifications").add({
@@ -1117,6 +1119,20 @@ async function startServer() {
     }
   });
 
+    // Temporary route to restore balance
+    app.post("/api/restore-balance", async (req, res) => {
+      try {
+        if (!db) return res.status(500).json({ error: "DB missing" });
+        const snapshot = await db.collection("users").get();
+        for (const doc of snapshot.docs) {
+          await doc.ref.update({ walletBalance: 5 });
+        }
+        res.json({ success: true, message: "Restored $5 to all users" });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1131,9 +1147,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Quantum Finance Server running on http://localhost:${PORT}`);
-  });
-}
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Quantum Finance Server running on http://localhost:${PORT}`);
+    });
+  }
 
 startServer();
