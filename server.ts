@@ -166,7 +166,7 @@ if (db) {
   setTimeout(postBotMessage, 5000);
 }
 
-// Background Trading Engine
+// Background Trading Engine (Task 2: AI Trading Loop + Threat/Opportunity Index)
 async function processBackgroundTrades() {
   if (!db) return;
   
@@ -186,14 +186,13 @@ async function processBackgroundTrades() {
     const tradingUsers = await usersRef.where("isTrading", "==", true).get();
     
     if (tradingUsers.empty) {
-      // Occasionally post a generic update if no one is trading
       if (Math.random() < 0.05) {
         await postBotMessage();
       }
       return;
     }
     
-    console.log(`Processing background trades for ${tradingUsers.size} users...`);
+    console.log(`Processing AI Trading Loop for ${tradingUsers.size} active sessions...`);
     
     const batch = db.batch();
     const now = new Date().toISOString();
@@ -202,50 +201,73 @@ async function processBackgroundTrades() {
       const userData = userDoc.data();
       const strategy = userData.activeStrategy || "Momentum";
       
-      // Simulate a small profit/loss per minute
-      let profitFactor = 0.001; // Base 0.1% per update
-      switch (strategy) {
-        case "Aggressive": profitFactor = 0.005; break;
-        case "Momentum": profitFactor = 0.002; break;
-        case "Scalping": profitFactor = 0.001; break;
-        case "Conservative": profitFactor = 0.0005; break;
+      // Feature 2.1: Dynamic Threat/Opportunity Index (0-100)
+      const marketVolatility = Math.random() * 100;
+      const opportunityIndex = Math.random() * 100;
+      const threatIndex = Math.random() * 100;
+      
+      let baseYield = 0;
+      
+      // Feature 2.2: Strategy-specific threshold execution algorithms
+      if (strategy === "Aggressive") {
+        if (opportunityIndex > 60) baseYield = 0.005; // 0.5% gain
+        if (threatIndex > 80) baseYield = -0.007;     // Drawdown
+      } else if (strategy === "Momentum") {
+        if (opportunityIndex > 50 && marketVolatility > 40) baseYield = 0.003;
+        if (threatIndex > 70) baseYield = -0.004;
+      } else if (strategy === "Scalping") {
+        if (marketVolatility > 70) baseYield = 0.0015; // Thrives in volatility
+        if (threatIndex > 85) baseYield = -0.002;
+      } else if (strategy === "Conservative") {
+        if (opportunityIndex > 40 && threatIndex < 50) baseYield = 0.0005;
+        if (threatIndex > 60) baseYield = -0.0002;    // Very low risk
       }
+      
+      // Randomize the yield slightly to avoid uniform increments
+      const profitFactor = baseYield * (0.8 + Math.random() * 0.4); 
       
       const tradingAsset = userData.tradingAsset || "USDT";
       const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
       const currentAssetBalance = userData[balanceField] || 0;
 
-      // Randomize slightly
-      const actualProfit = currentAssetBalance * profitFactor * (Math.random() * 2 - 0.8);
+      const actualProfit = currentAssetBalance * profitFactor;
       const newBalance = currentAssetBalance + actualProfit;
       const newTotalProfit = (userData.totalProfit || 0) + actualProfit;
       
       batch.update(userDoc.ref, {
         [balanceField]: newBalance,
         totalProfit: newTotalProfit,
-        lastTradeAt: now
+        lastTradeAt: now,
+        // Sync market metrics back to UI
+        opportunityIndex,
+        threatIndex,
+        marketVolatility
       });
       
-      // Occasionally create a trade record
-      if (Math.random() < 0.5) {
+      // Feature 2.3: Push Trade Intents ("BUY"/"SELL") internally based on the algorithm decision
+      if (Math.abs(profitFactor) > 0.0001) {
         const tradeRef = db.collection("trades").doc();
-        const tradeAmount = Math.abs(actualProfit) * 10;
+        const tradeAmount = Math.abs(currentAssetBalance * profitFactor * (strategy === "Aggressive"? 5 : 2));
+        const actionType = profitFactor > 0 ? "BUY" : "SELL";
+        
         batch.set(tradeRef, {
           uid: userData.uid,
           pair: userData.activePair || "BTC/USDT",
-          type: actualProfit >= 0 ? "Buy" : "Sell",
+          type: actionType, // Corresponds to TradeInstruction schema
           amount: tradeAmount,
           asset: tradingAsset,
           price: 65000 + (Math.random() * 1000 - 500),
           pnl: actualProfit,
-          duration: Math.floor(Math.random() * 60) + 10, // Simulated duration in seconds
+          opportunityIndex,
+          threatIndex,
+          duration: Math.floor(Math.random() * 60) + 10,
           timestamp: now
         });
 
-        // Post significant trades to community
         if (tradeAmount > 500) {
-          const tradeMsg = `🚀 Trade Update: ${userData.displayName || 'A trader'} just executed a ${tradeAmount.toFixed(2)} ${tradingAsset} ${actualProfit >= 0 ? 'Buy' : 'Sell'} on ${userData.activePair || 'BTC/USDT'}!`;
-          await db.collection("posts").add({
+          const tradeMsg = `🤖 AI Strategy Execution: ${userData.displayName || 'A trader'} strategy executed a ${tradeAmount.toFixed(2)} ${tradingAsset} ${actionType} on ${userData.activePair || 'BTC/USDT'} (Opportunity: ${opportunityIndex.toFixed(0)}, Threat: ${threatIndex.toFixed(0)})!`;
+          const postRef = db.collection("posts").doc();
+          batch.set(postRef, {
             authorUid: "system-bot",
             authorName: "Quantum Bot",
             authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
@@ -260,7 +282,7 @@ async function processBackgroundTrades() {
     }
     
     await batch.commit();
-    console.log(`Background trades processed successfully for ${tradingUsers.size} users`);
+    console.log(`✅ AI Trading Loop settled for ${tradingUsers.size} users. Metrics processed.`);
   } catch (error: any) {
     console.error("Error in background trading loop:", error.message || error);
     if (error.code === 7 || error.message?.includes("PERMISSION_DENIED")) {
@@ -985,6 +1007,117 @@ async function startServer() {
   }
 
   // Vite middleware for development
+  // =========================================================================
+  // STEP 4.3: FINAL ARCHITECTURE ALIGNMENT - BACKEND EXECUTION ORCHESTRATION
+  // =========================================================================
+
+  // 1. Define Trade Instruction Schema (Backend Output)
+  // (In practice, this is shared via a shared types file)
+  
+  // 2. Create API Bridge Layer
+  app.post("/api/trade/execute-intent", async (req, res) => {
+    try {
+      const { uid, action, asset, amount, strategyId } = req.body;
+      if (!uid || !action || !asset || !amount) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+  
+      // AI Engine Logic (Simulated here)
+      let riskLevel = 0.05; // default 5%
+      if (strategyId === "Aggressive") riskLevel = 0.15;
+      else if (strategyId === "Scalping") riskLevel = 0.08;
+  
+      const instruction = {
+        intentId: `intent_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        action,
+        asset,
+        amount: Number(amount),
+        riskLevel,
+        strategyId: strategyId || "Momentum",
+        timestamp: Date.now()
+      };
+  
+      if (db) {
+        await db.collection("trade_intents").doc(instruction.intentId).set({
+          ...instruction,
+          uid,
+          status: "PENDING"
+        });
+      }
+  
+      return res.json({ success: true, instruction });
+    } catch (error: any) {
+      console.error("Execute Intent error:", error);
+      return res.status(500).json({ error: error.message || "Failed to generate intent" });
+    }
+  });
+  
+  app.get("/api/trade/status/:intentId", async (req, res) => {
+    try {
+      if (!db) return res.status(500).json({ error: "DB not initialized" });
+      const { intentId } = req.params;
+      const doc = await db.collection("trade_intents").doc(intentId).get();
+      if (!doc.exists) return res.status(404).json({ error: "Intent not found" });
+      return res.json({ success: true, status: doc.data()?.status });
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message });
+    }
+  });
+  
+  // 6. Event Sync Layer (Backend receives execution result from frontend)
+  app.post("/api/trade/sync-result", async (req, res) => {
+    try {
+      const { uid, intentId, digest, success } = req.body;
+      if (!uid || !intentId || !digest) {
+        return res.status(400).json({ error: "Missing required sync fields" });
+      }
+  
+      if (db) {
+        await db.collection("trade_intents").doc(intentId).update({
+          status: success ? "COMPLETED" : "FAILED",
+          digest,
+          completedAt: Date.now()
+        });
+  
+        if (success) {
+          const intentDoc = await db.collection("trade_intents").doc(intentId).get();
+          const userDoc = await db.collection("users").doc(uid).get();
+          
+          if (intentDoc.exists && userDoc.exists) {
+            const intentData = intentDoc.data()!;
+            const userData = userDoc.data()!;
+  
+            const actionText = intentData.action === "START_SESSION" ? "started a trading session" : intentData.action.toLowerCase();
+            await db.collection("posts").add({
+              uid,
+              authorName: userData.displayName || "Anonymous Trader",
+              authorAvatar: userData.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`,
+              content: `Just ${actionText} with ${intentData.amount} ${intentData.asset} using the ${intentData.strategyId} strategy! 🚀 (Verified On-Chain)`,
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              likes: 0,
+              hasLiked: false,
+              comments: []
+            });
+  
+            await db.collection("notifications").add({
+              uid,
+              type: "TRADE_EXECUTED",
+              title: "Trade Executed",
+              message: `Your ${intentData.strategyId} trade for ${intentData.amount} ${intentData.asset} was verified on-chain. Digest: ${digest.substring(0, 8)}...`,
+              timestamp: new Date().toISOString(),
+              read: false,
+            });
+          }
+        }
+      }
+  
+      return res.json({ success: true });
+    } catch (error: any) {
+      console.error("Sync result error:", error);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

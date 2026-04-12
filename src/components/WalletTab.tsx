@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
 import { motion } from "motion/react";
-import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
+import { deriveSuiWallet, getAllBalances, buildTransferOnChainPTB, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
-import { Bell, CheckCircle2, Info, AlertCircle } from "lucide-react";
+import { Bell, CheckCircle2, Info, AlertCircle, Link } from "lucide-react";
+import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
+import { useInitExecutionAdapter } from "../lib/executionAdapter";
 
 import { toast } from "sonner";
 
@@ -41,12 +43,25 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const chains = ["Sui"];
   const assets = ["SUI", "USDT", "USDC"];
 
+  const currentAccount = useCurrentAccount(); // UI Wallet
+  const executionAdapter = useInitExecutionAdapter(user);
+  
+  // ==== UNIFIED WALLET LAYER (STEP 3.3) ====
+  const executionWallet = useMemo(() => user ? deriveSuiWallet(user.uid) : null, [user]);
+  const walletLayer = {
+    uiWallet: currentAccount,
+    executionWallet: executionWallet!,
+  };
+  // ==========================================
+
   useEffect(() => {
-    if (user) {
-      const keypair = deriveSuiWallet(user.uid);
-      const addr = keypair.toSuiAddress();
-      setAddress(addr);
-      refreshBalances(addr);
+    if (user && walletLayer.executionWallet) {
+      const legacyAddr = walletLayer.executionWallet.toSuiAddress();
+      
+      // Fallback Display Logic
+      const activeAddress = walletLayer.uiWallet?.address || legacyAddr;
+      setAddress(activeAddress);
+      refreshBalances(activeAddress);
 
       // Listen for notifications
       const q = query(
@@ -106,19 +121,34 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     setSending(true);
     toast.loading("Sending transaction...", { id: "send" });
     try {
-      const keypair = deriveSuiWallet(user.uid);
+      // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
+      const executionWallet = walletLayer.executionWallet;
+      const executionAddress = executionWallet.toSuiAddress();
+      const UIWallet = walletLayer.uiWallet?.address || "None";
+      
+      console.log(`[EXECUTION: SEND] Target: ${sendParams.recipient}`);
+      console.log(`[EXECUTION: SEND] Display/Connected Wallet: ${UIWallet}`);
+      console.log(`[EXECUTION: SEND] Selected Execution Wallet (Legacy): ${executionAddress}`);
+      // ================================================
+
       let coinType = USDT_TYPE;
       if (sendParams.asset === "SUI") coinType = SUI_TYPE;
       if (sendParams.asset === "USDC") coinType = USDC_TYPE;
 
-      const result = await crossChainTransfer({
-        signer: keypair,
-        fromAddress: address,
-        toAddress: sendParams.recipient,
+      // Handle Cross Chain Routing (currently mocked as Sui-to-Sui direct transfer)
+      if (sendParams.chain !== "Sui") {
+        throw new Error(`Cross-chain transfer to ${sendParams.chain} is not supported in this version. Only Sui-to-Sui transfers are currently active.`);
+      }
+
+      const senderAddress = walletLayer.uiWallet?.address || executionWallet.toSuiAddress();
+      const tx = await buildTransferOnChainPTB({
+        senderAddress,
+        to: sendParams.recipient,
         amount: parseFloat(sendParams.amount),
-        destinationChain: sendParams.chain,
         coinType: coinType
       });
+      const result = await executionAdapter.executeTransaction(tx);
+      
       console.log("Transfer successful:", result);
       
       // Add notification
@@ -145,39 +175,55 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   };
 
   const handleDeposit = async () => {
-    if (balances.usdt <= 0 && balances.usdc <= 0) {
-      toast.error("No USDT or USDC found on-chain to deposit.");
-      return;
-    }
-    
     setToppingUp(true);
-    toast.loading("Processing deposit...", { id: "deposit" });
+    toast.loading("Verifying execution balances...", { id: "deposit" });
     try {
-      const keypair = deriveSuiWallet(user.uid);
+      // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
+      const executionWallet = walletLayer.executionWallet;
+      const executionAddress = executionWallet.toSuiAddress();
+      const UIWallet = walletLayer.uiWallet?.address || "None";
       
-      // Deposit both if available
-      const usdtAmount = balances.usdt;
-      const usdcAmount = balances.usdc;
+      console.log(`[EXECUTION: DEPOSIT] Connecting funding stream...`);
+      console.log(`[EXECUTION: DEPOSIT] Display/Connected Wallet: ${UIWallet}`);
+      console.log(`[EXECUTION: DEPOSIT] Selected Execution Wallet (Legacy): ${executionAddress}`);
+      // ================================================
+      
+      // Execute from the execution wallet as the single source of truth
+      const execBalances = await getAllBalances(executionAddress);
+      
+      const usdtAmount = execBalances.usdt;
+      const usdcAmount = execBalances.usdc;
       const totalAmount = usdtAmount + usdcAmount;
+      
+      if (totalAmount <= 0) {
+        toast.error(`No USDT or USDC found on execution wallet to deposit.`, { id: "deposit" });
+        return;
+      }
+
+      toast.loading("Processing deposit...", { id: "deposit" });
       
       if (usdtAmount > 0) {
         console.log(`Depositing ${usdtAmount} USDT from on-chain...`);
-        await transferOnChain({
-          signer: keypair,
+        const senderAddress = walletLayer.uiWallet?.address || executionWallet.toSuiAddress();
+        const tx = await buildTransferOnChainPTB({
+          senderAddress,
           to: SUI_TREASURY_ADDRESS,
           amount: usdtAmount,
           coinType: USDT_TYPE
         });
+        await executionAdapter.executeTransaction(tx);
       }
       
       if (usdcAmount > 0) {
         console.log(`Depositing ${usdcAmount} USDC from on-chain...`);
-        await transferOnChain({
-          signer: keypair,
+        const senderAddress = walletLayer.uiWallet?.address || executionWallet.toSuiAddress();
+        const tx = await buildTransferOnChainPTB({
+          senderAddress,
           to: SUI_TREASURY_ADDRESS,
           amount: usdcAmount,
           coinType: USDC_TYPE
         });
+        await executionAdapter.executeTransaction(tx);
       }
       
       // 2. Update Firestore wallet balance
@@ -223,6 +269,16 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     setWithdrawing(true);
     toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
+      // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
+      const executionWallet = walletLayer.executionWallet;
+      const executionAddress = executionWallet.toSuiAddress();
+      const UIWallet = walletLayer.uiWallet?.address || "None";
+      
+      console.log(`[EXECUTION: WITHDRAW] Initializing external withdrawal...`);
+      console.log(`[EXECUTION: WITHDRAW] Display/Connected Wallet: ${UIWallet}`);
+      console.log(`[EXECUTION: WITHDRAW] Default Withdrawal Wallet (Legacy Execution): ${executionAddress}`);
+      // ================================================
+
       const response = await fetch("/api/wallet/withdraw", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -230,7 +286,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           uid: user.uid,
           amount,
           asset: withdrawParams.asset,
-          walletAddress: withdrawParams.externalAddress || address
+          walletAddress: withdrawParams.externalAddress || executionAddress
         })
       });
 
@@ -261,8 +317,36 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     }
   };
 
+  
+
   return (
     <div className="space-y-4 md:space-y-6 pb-20 md:pb-0">
+      {/* Non-Destructive External Wallet Connection (New Architecture) */}
+      <div className="bg-[#0a0a0a] border border-blue-500/30 rounded-xl md:rounded-3xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+          <Link size={120} className="text-blue-500" />
+        </div>
+        <div className="flex-1 z-10 text-center md:text-left">
+          <h3 className="text-lg font-bold text-blue-400 mb-1 flex items-center justify-center md:justify-start gap-2">
+            <Link size={18} /> External Wallet Connection
+          </h3>
+          <p className="text-xs text-white/50 max-w-sm mx-auto md:mx-0">
+            Securely connect your Sui browser wallet. Currently operating in dual-track mode alongside your Quantum profile wallet.
+          </p>
+        </div>
+        <div className="z-10 flex flex-col items-center md:items-end gap-2 shrink-0">
+          <ConnectButton className="!bg-blue-600 hover:!bg-blue-500 !text-white !rounded-xl !transition-all !border-none !py-2.5" />
+          {currentAccount && (
+            <div className="flex items-center gap-2 text-xs mt-1">
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse hidden md:block"></span>
+              <span className="text-green-400 font-mono bg-green-400/10 px-2 py-0.5 rounded-full border border-green-400/20">
+                Connected: {currentAccount.address.slice(0, 6)}...{currentAccount.address.slice(-4)}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Profile & Wallet Card */}
       <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-8 flex flex-col md:flex-row items-center gap-4 md:gap-8 shadow-2xl overflow-hidden relative">
         <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -279,14 +363,21 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         </div>
         <div className="flex-1 text-center md:text-left min-w-0 z-10">
           <h2 className="text-xl md:text-3xl font-bold tracking-tight mb-1 md:mb-2 truncate">{user?.displayName || "Quantum Explorer"}</h2>
-          <div className="flex items-center justify-center md:justify-start gap-2 text-white/40">
-            <span className="text-[9px] md:text-xs font-mono bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10 truncate max-w-[150px] md:max-w-[200px]">
-              {address.slice(0, 6)}...{address.slice(-6)}
-            </span>
-            <button onClick={handleCopy} className="hover:text-orange-500 transition-colors shrink-0 p-1 relative">
-              {copied ? <ShieldCheck size={12} className="text-green-500" /> : <Copy size={12} className="md:w-3.5 md:h-3.5" />}
-              {copied && <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-green-500 text-black text-[8px] px-2 py-1 rounded font-bold">COPIED</span>}
-            </button>
+          <div className="flex flex-col items-center justify-center md:justify-start gap-1 text-white/40">
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] md:text-xs font-mono bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10 truncate max-w-[150px] md:max-w-[200px]">
+                {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : "Loading..."}
+              </span>
+              <button onClick={handleCopy} className="hover:text-orange-500 transition-colors shrink-0 p-1 relative">
+                {copied ? <ShieldCheck size={12} className="text-green-500" /> : <Copy size={12} className="md:w-3.5 md:h-3.5" />}
+                {copied && <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-green-500 text-black text-[8px] px-2 py-1 rounded font-bold">COPIED</span>}
+              </button>
+            </div>
+            {!currentAccount && (
+              <span className="text-[8px] md:text-[10px] text-orange-500/70 block mt-1" title="Please connect an external wallet to migrate.">
+                Using Legacy System (Inactive/Fallback)
+              </span>
+            )}
           </div>
         </div>
         <div className="flex gap-2 md:gap-3 w-full md:w-auto z-10">
@@ -373,7 +464,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <button 
             onClick={handleDeposit}
-            disabled={toppingUp || (balances.usdt <= 0 && balances.usdc <= 0)}
+            disabled={toppingUp}
             className="mt-3 md:mt-4 w-full bg-orange-500/10 border border-orange-500/20 text-orange-500 font-bold py-2 rounded-lg md:rounded-xl hover:bg-orange-500/20 transition-all flex items-center justify-center gap-2 text-[10px] md:text-xs disabled:opacity-50"
           >
             <Plus size={14} />
@@ -702,3 +793,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
 };
 
 export default WalletTab;
+
+
+
+

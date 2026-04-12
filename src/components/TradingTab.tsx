@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2, ArrowDownLeft } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
-import { deriveSuiWallet, transferOnChain, startSessionOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
+import { deriveSuiWallet, buildTransferOnChainPTB, buildStartSessionPTB, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
+import { buildPTBFromTradeInstruction } from "../lib/tradeInstructions";
+import { useCurrentAccount } from "@mysten/dapp-kit";
+import { useInitExecutionAdapter } from "../lib/executionAdapter";
 
 import { toast } from "sonner";
 
@@ -27,6 +30,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawAddress, setWithdrawAddress] = useState("");
   const [withdrawAsset, setWithdrawAsset] = useState("USDT");
+
+  const currentAccount = useCurrentAccount(); // Added for UI/Execution isolation
+  const executionAdapter = useInitExecutionAdapter(user);
+
+  // ==== UNIFIED WALLET LAYER (STEP 3.3) ====
+  const executionWallet = useMemo(() => user ? deriveSuiWallet(user.uid) : null, [user]);
+  const walletLayer = {
+    uiWallet: currentAccount,
+    executionWallet: executionWallet!,
+  };
+  // ==========================================
 
   // Sync with Firestore
   useEffect(() => {
@@ -107,11 +121,21 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           toast.success("Trading stopped! Demo mode.", { id: "settle" });
         } else {
           toast.loading("Settling trades on-chain...", { id: "settle" });
-          const address = deriveSuiWallet(user.uid).toSuiAddress();
+          
+          // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
+          const executionWallet = walletLayer.executionWallet;
+          const executionAddress = executionWallet.toSuiAddress();
+          const UIWallet = walletLayer.uiWallet?.address || "None";
+          
+          console.log(`[EXECUTION: SETTLE] Stopping trades...`);
+          console.log(`[EXECUTION: SETTLE] Connected/UI Wallet: ${UIWallet}`);
+          console.log(`[EXECUTION: SETTLE] Sending Legacy Exec Address to API: ${executionAddress}`);
+          // ================================================
+          
           const response = await fetch("/api/trading/settle", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ uid: user.uid, walletAddress: address })
+            body: JSON.stringify({ uid: user.uid, walletAddress: executionAddress })
           });
           if (!response.ok) {
             const text = await response.text();
@@ -261,8 +285,18 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         toast.success(`Successfully funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
       } else {
         // 2. Fund from on-chain (requires transfer to treasury or contract)
-        const address = deriveSuiWallet(user.uid).toSuiAddress();
-        const balances = await getAllBalances(address);
+        
+        // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
+        const executionWallet = walletLayer.executionWallet;
+        const executionAddress = executionWallet.toSuiAddress();
+        const UIWallet = walletLayer.uiWallet?.address || "None";
+        
+        console.log(`[EXECUTION: FUND] Initializing funding check...`);
+        console.log(`[EXECUTION: FUND] Display/Connected Wallet: ${UIWallet}`);
+        console.log(`[EXECUTION: FUND] Funding from Legacy Execution Wallet: ${executionAddress}`);
+        // ================================================
+
+        const balances = await getAllBalances(executionAddress);
         
         let currentOnChainBalance = 0;
         if (tradingAsset === "SUI") currentOnChainBalance = balances.sui;
@@ -282,25 +316,66 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         }
 
         console.log(`Funding ${amount} from on-chain...`);
-        const keypair = deriveSuiWallet(user.uid);
         let sessionId = null;
 
-        if (tradingAsset === "SUI") {
-          // Call Move contract for SUI funding
-          sessionId = await startSessionOnChain({
-            signer: keypair,
+        // =========================================================================
+        // STEP 4.3: Architecture Alignment - Backend orchestration pipeline
+        // =========================================================================
+        const actionType = tradingAsset === "SUI" ? "START_SESSION" : "DEPOSIT";
+        
+        // 1. AI Decision happens backend via API Intent
+        const intentRes = await fetch("/api/trade/execute-intent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uid: user.uid,
+            action: actionType,
+            asset: tradingAsset,
             amount: amount,
-          });
-        } else {
-          // Transfer USDT/USDC to treasury
-          const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
-          await transferOnChain({
-            signer: keypair,
-            to: SUI_TREASURY_ADDRESS,
-            amount: amount,
-            coinType: coinType
-          });
+            strategyId: strategy
+          })
+        });
+
+        if (!intentRes.ok) {
+          const text = await intentRes.text();
+          throw new Error(JSON.parse(text).error || "Failed to fetch intent from backend");
         }
+        
+        const { instruction } = await intentRes.json();
+        
+        // 2. Build the exact PTB via Frontend mapping using the Dapp Wallet OR execution wallet
+        const senderAddress = walletLayer.uiWallet?.address || executionWallet!.toSuiAddress();
+        const tx = await buildPTBFromTradeInstruction(instruction, senderAddress);
+
+        // 3. Wallet Signing Gateway (execute through executionAdapter layer using connected Dapp-Kit UI)
+        const result = await executionAdapter.executeTransaction(tx);
+
+        // Optional logic for Move Call session IDs extraction
+        if (actionType === "START_SESSION") {
+          const sessionObject = result.objectChanges?.find(
+            (change: any) =>
+              change.type === "created" &&
+              change.objectType.includes("::trading::TradingSession")
+          );
+
+          if (!sessionObject || !("objectId" in sessionObject)) {
+            throw new Error("TradingSession object not found in transaction results");
+          }
+          sessionId = sessionObject.objectId as string;
+        }
+
+        // 4. Sync Result Back to Backend
+        await fetch("/api/trade/sync-result", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uid: user.uid,
+            intentId: instruction.intentId,
+            digest: result.digest,
+            success: true
+          })
+        });
+        // =========================================================================
 
         const userRef = doc(db, "users", user.uid);
         const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
@@ -367,17 +442,21 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setPnl(0);
         toast.success(`Successfully withdrawn ${pnl.toFixed(2)} to wallet balance! (Demo mode)`, { id: "withdraw-profit" });
       } else {
-        const address = deriveSuiWallet(user.uid).toSuiAddress();
-        const response = await fetch("/api/trading/withdraw-profit", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uid: user.uid, walletAddress: address })
-        });
+          // ==== TRANSACTION LAYER ISOLATION (STEP 3.2) ====
+          const executionWallet = walletLayer.executionWallet;
+          const executionAddress = executionWallet.toSuiAddress();
+          const UIWallet = walletLayer.uiWallet?.address || "None";
+          
+          console.log(`[EXECUTION: WITHDRAW] Initializing withdrawal check...`);
+          console.log(`[EXECUTION: WITHDRAW] Display/Connected Wallet: ${UIWallet}`);
+          console.log(`[EXECUTION: WITHDRAW] Withdrawing to Legacy Execution Wallet: ${executionAddress}`);
+          // ================================================
 
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(`Server error (${response.status}): ${text}`);
-        }
+          const response = await fetch("/api/trading/withdraw-profit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ uid: user.uid, walletAddress: executionAddress })
+          });
 
         const result = await response.json();
         if (result.success) {
@@ -761,3 +840,5 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 };
 
 export default TradingTab;
+
+

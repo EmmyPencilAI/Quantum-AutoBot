@@ -1,0 +1,84 @@
+patch_server.js(5,17): error TS1127: Invalid character.
+patch_server.js(10,18): error TS8006: 'interface' declarations can only be used in TypeScript files.
+patch_server.js(34,17): error TS1127: Invalid character.
+patch_server.js(34,18): error TS1127: Invalid character.
+patch_server.js(34,19): error TS1127: Invalid character.
+patch_server.js(34,27): error TS1127: Invalid character.
+patch_server.js(34,28): error TS1127: Invalid character.
+patch_server.js(34,29): error TS1127: Invalid character.
+patch_server.js(34,31): error TS1127: Invalid character.
+patch_server.js(34,32): error TS1127: Invalid character.
+patch_server.js(34,33): error TS1127: Invalid character.
+patch_server.js(34,34): error TS1127: Invalid character.
+patch_server.js(34,35): error TS1127: Invalid character.
+patch_server.js(34,36): error TS1127: Invalid character.
+patch_server.js(34,37): error TS1136: Property assignment expected.
+patch_server.js(97,48): error TS1127: Invalid character.
+patch_server.js(97,49): error TS1127: Invalid character.
+patch_server.js(97,50): error TS1127: Invalid character.
+patch_server.js(98,20): error TS1005: ',' expected.
+patch_server.js(98,22): error TS1127: Invalid character.
+patch_server.js(98,23): error TS1127: Invalid character.
+patch_server.js(98,24): error TS1127: Invalid character.
+patch_server.js(98,30): error TS1127: Invalid character.
+patch_server.js(98,31): error TS1127: Invalid character.
+patch_server.js(98,32): error TS1127: Invalid character.
+patch_server.js(98,39): error TS1127: Invalid character.
+patch_server.js(98,40): error TS1127: Invalid character.
+patch_server.js(98,41): error TS1127: Invalid character.
+patch_server.js(98,43): error TS1127: Invalid character.
+patch_server.js(98,44): error TS1127: Invalid character.
+patch_server.js(98,45): error TS1127: Invalid character.
+patch_server.js(98,53): error TS1005: ',' expected.
+patch_server.js(98,57): error TS1127: Invalid character.
+patch_server.js(98,58): error TS1127: Invalid character.
+patch_server.js(98,59): error TS1127: Invalid character.
+patch_server.js(98,71): error TS1127: Invalid character.
+patch_server.js(98,74): error TS1136: Property assignment expected.
+patch_server.js(98,84): error TS1005: ',' expected.
+patch_server.js(98,93): error TS1127: Invalid character.
+patch_server.js(98,94): error TS1127: Invalid character.
+patch_server.js(98,95): error TS1127: Invalid character.
+patch_server.js(98,96): error TS1135: Argument expression expected.
+patch_server.js(99,22): error TS1005: ',' expected.
+patch_server.js(100,18): error TS1005: ',' expected.
+patch_server.js(101,21): error TS1005: ',' expected.
+patch_server.js(102,21): error TS1005: ',' expected.
+patch_server.js(103,11): error TS1005: ',' expected.
+patch_server.js(103,12): error TS1128: Declaration or statement expected.
+patch_server.js(109,22): error TS1127: Invalid character.
+patch_server.js(109,23): error TS1127: Invalid character.
+patch_server.js(109,24): error TS1127: Invalid character.
+patch_server.js(109,30): error TS1127: Invalid character.
+patch_server.js(109,31): error TS1127: Invalid character.
+patch_server.js(109,32): error TS1127: Invalid character.
+patch_server.js(109,40): error TS1005: ',' expected.
+patch_server.js(109,44): error TS1127: Invalid character.
+patch_server.js(109,45): error TS1127: Invalid character.
+patch_server.js(109,46): error TS1127: Invalid character.
+patch_server.js(109,48): error TS1127: Invalid character.
+patch_server.js(109,49): error TS1127: Invalid character.
+patch_server.js(109,50): error TS1127: Invalid character.
+patch_server.js(109,56): error TS1005: ',' expected.
+patch_server.js(109,65): error TS1005: ',' expected.
+patch_server.js(109,67): error TS1005: ',' expected.
+patch_server.js(109,81): error TS1005: ',' expected.
+patch_server.js(109,83): error TS1127: Invalid character.
+patch_server.js(109,84): error TS1127: Invalid character.
+patch_server.js(109,85): error TS1127: Invalid character.
+patch_server.js(109,89): error TS1127: Invalid character.
+patch_server.js(109,90): error TS1127: Invalid character.
+patch_server.js(109,91): error TS1127: Invalid character.
+patch_server.js(109,92): error TS1135: Argument expression expected.
+patch_server.js(110,22): error TS1005: ',' expected.
+patch_server.js(111,17): error TS1005: ',' expected.
+patch_server.js(112,11): error TS1135: Argument expression expected.
+patch_server.js(113,9): error TS1128: Declaration or statement expected.
+patch_server.js(114,7): error TS1128: Declaration or statement expected.
+patch_server.js(115,5): error TS1128: Declaration or statement expected.
+patch_server.js(118,3): error TS1128: Declaration or statement expected.
+patch_server.js(118,5): error TS1005: 'try' expected.
+patch_server.js(122,1): error TS1128: Declaration or statement expected.
+patch_server.js(122,2): error TS1128: Declaration or statement expected.
+patch_server.js(123,1): error TS1127: Invalid character.
+patch_server_clean.mjs(128,1): error TS1160: Unterminated template literal.
