@@ -21,7 +21,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [selectedPair, setSelectedPair] = useState("BTC / USDT");
   const [pnl, setPnl] = useState(0);
   const [initialInvestment, setInitialInvestment] = useState(0);
-  const [history, setHistory] = useState<any[]>([]);
+    const [walletBalance, setWalletBalance] = useState(0);
+    const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [fundAmount, setFundAmount] = useState("0");
   
@@ -49,6 +50,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setSelectedPair(data.activePair || "BTC / USDT");
         setPnl(data.totalProfit || 0);
         setInitialInvestment(data.initialInvestment || 0);
+          setWalletBalance(data.walletBalance || 0);
         
         setTradingAsset(data.tradingAsset || "USDT");
         if (data.tradingSessionId) setTradingSessionId(data.tradingSessionId);
@@ -800,7 +802,7 @@ const changeStrategy = async (newStrategy: string) => {
                       className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white font-bold focus:outline-none focus:border-orange-500/50 transition-all"
                     />
                     <button 
-                      onClick={() => setWithdrawAmount("0")}
+                      onClick={() => setWithdrawAmount((walletBalance || 0).toString())}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-orange-500 hover:text-orange-400"
                     >
                       MAX
