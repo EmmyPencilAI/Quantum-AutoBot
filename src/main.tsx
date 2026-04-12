@@ -10,7 +10,7 @@ import './index.css';
 const queryClient = new QueryClient();
 
 const { networkConfig } = createNetworkConfig({
-  testnet: { url: 'https://fullnode.testnet.sui.io:443' }
+  testnet: { url: 'https://fullnode.testnet.sui.io:443' } as any
 });
 
 createRoot(document.getElementById('root')!).render(

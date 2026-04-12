@@ -7,8 +7,7 @@ import dotenv from "dotenv";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
-import { BaseClient } from "@mysten/sui/client";
-import { getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey as decodeSuiPrivateKeySDK } from "@mysten/sui/cryptography";
@@ -28,7 +27,7 @@ function decodeSuiPrivateKey(key: string): Uint8Array {
 }
 
 // Sui Client for Backend
-const suiClient = new BaseClient({ url: getJsonRpcFullnodeUrl("testnet") });
+const suiClient = new SuiClient({ url: getFullnodeUrl("testnet") } as any);
 
 // Load Firebase Config
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
@@ -428,9 +427,9 @@ async function startServer() {
           
           txb.setGasBudget(10000000); // 0.01 SUI
           
-          const result = await suiClient.signAndExecuteTransactionBlock({
+          const result = await suiClient.signAndExecuteTransaction({
             signer: keypair,
-            transactionBlock: txb,
+            transaction: txb,
           });
           
           txHash = result.digest;
@@ -615,9 +614,9 @@ async function startServer() {
             
             txb.setGasBudget(20000000); // 0.02 SUI
             
-            const result = await suiClient.signAndExecuteTransactionBlock({
+            const result = await suiClient.signAndExecuteTransaction({
               signer: keypair,
-              transactionBlock: txb,
+              transaction: txb,
             });
             
             txHash = result.digest;
@@ -731,7 +730,7 @@ async function startServer() {
             txb.transferObjects([mainCoin], walletAddress || userData.walletAddress);
             
             txb.setGasBudget(10000000);
-            const result = await suiClient.signAndExecuteTransactionBlock({ signer: keypair, transactionBlock: txb });
+            const result = await suiClient.signAndExecuteTransaction({ signer: keypair, transaction: txb });
             txHash = result.digest;
           }
         } catch (e: any) {

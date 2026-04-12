@@ -48,11 +48,19 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   
   
 
+  // Track on-chain address if available
   useEffect(() => {
-    if (user && currentAccount?.address) {
-      const activeAddress = currentAccount.address;
-      setAddress(activeAddress);
-      refreshBalances(activeAddress);
+    if (currentAccount?.address) {
+      setAddress(currentAccount.address);
+    } else {
+      setAddress("");
+    }
+  }, [currentAccount?.address]);
+
+  // General initial load: Fetch DB wallet & on-chain balances
+  useEffect(() => {
+    if (user) {
+      refreshBalances(currentAccount?.address || "");
 
       // Listen for notifications
       const q = query(
@@ -66,7 +74,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       });
       return () => unsubscribe();
     }
-  }, [user]);
+  }, [user, currentAccount?.address]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(address);
@@ -92,7 +100,13 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const refreshBalances = async (addr: string) => {
     setLoading(true);
     try {
-      const { sui, usdt, usdc } = await getAllBalances(addr);
+      let sui = 0, usdt = 0, usdc = 0;
+      if (addr) {
+        const onchain = await getAllBalances(addr);
+        sui = onchain.sui; 
+        usdt = onchain.usdt; 
+        usdc = onchain.usdc;
+      }
       
       // Fetch Firestore wallet balance
       const userRef = doc(db, "users", user.uid);
@@ -123,7 +137,8 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         throw new Error(`Cross-chain transfer to ${sendParams.chain} is not supported in this version. Only Sui-to-Sui transfers are currently active.`);
       }
 
-      const senderAddress = currentAccount?.address || executionWallet.toSuiAddress();
+      const senderAddress = currentAccount?.address;
+      if (!senderAddress) throw new Error("Wallet not connected");
       const tx = await buildTransferOnChainPTB({
         senderAddress,
         to: sendParams.recipient,
@@ -163,8 +178,9 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     try {
       
       
+      if (!currentAccount?.address) throw new Error("Wallet not connected");
       // Execute from the execution wallet as the single source of truth
-      const execBalances = await getAllBalances(executionAddress);
+      const execBalances = await getAllBalances(currentAccount.address);
       
       const usdtAmount = execBalances.usdt;
       const usdcAmount = execBalances.usdc;
@@ -179,7 +195,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       
       if (usdtAmount > 0) {
         console.log(`Depositing ${usdtAmount} USDT from on-chain...`);
-        const senderAddress = currentAccount?.address || executionWallet.toSuiAddress();
+        const senderAddress = currentAccount?.address; if (!senderAddress) throw new Error('Wallet not connected');
         const tx = await buildTransferOnChainPTB({
           senderAddress,
           to: SUI_TREASURY_ADDRESS,
@@ -191,7 +207,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       
       if (usdcAmount > 0) {
         console.log(`Depositing ${usdcAmount} USDC from on-chain...`);
-        const senderAddress = currentAccount?.address || executionWallet.toSuiAddress();
+        const senderAddress = currentAccount?.address; if (!senderAddress) throw new Error('Wallet not connected');
         const tx = await buildTransferOnChainPTB({
           senderAddress,
           to: SUI_TREASURY_ADDRESS,
@@ -253,7 +269,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           uid: user.uid,
           amount,
           asset: withdrawParams.asset,
-          walletAddress: withdrawParams.externalAddress || executionAddress
+          walletAddress: withdrawParams.externalAddress || currentAccount?.address
         })
       });
 

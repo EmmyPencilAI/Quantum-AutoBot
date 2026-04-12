@@ -1,6 +1,5 @@
 import { Transaction } from "@mysten/sui/transactions";
 import { buildTransferOnChainPTB, buildStartSessionPTB, SUI_TREASURY_ADDRESS, USDT_TYPE, USDC_TYPE, SUI_TYPE } from "./sui";
-import { verifyMessage } from "ethers"; // Example via ethers for ECDSA, or @mysten/sui signing utils for Ed25519
 import { MainnetRiskEngine, RISK_PROFILES } from "./riskEngine";
 
 export interface TradeInstruction {
