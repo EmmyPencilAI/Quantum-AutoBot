@@ -164,7 +164,7 @@ module quantum::trading {
         let total_val = balance::value(&session.principal);
         assert!(total_val > 0, E_INVALID_AMOUNT);
 
-        let fee_val = total_val / 10; // 10% platform fee
+        let fee_val = total_val / 1000; // 0.1% platform fee (matches TypeScript PLATFORM_FEE_PERCENT = 0.001)
         let payout_val = total_val - fee_val;
 
         let fee_balance = balance::split(&mut session.principal, fee_val);

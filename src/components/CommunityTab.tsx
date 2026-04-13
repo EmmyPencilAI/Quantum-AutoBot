@@ -4,15 +4,18 @@ import { motion, AnimatePresence } from "motion/react";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, increment, limit, setDoc, deleteDoc } from "firebase/firestore";
 import { toast } from "sonner";
+import type { Post, Comment, FirebaseUser } from "../types";
 
 interface CommunityTabProps {
-  user: any;
+  user: FirebaseUser | null;
 }
 
-const formatDateTime = (date: any) => {
+const formatDateTime = (date: { toDate: () => Date } | string | null | undefined): string => {
   if (!date) return "";
   try {
-    const d = date.toDate ? date.toDate() : new Date(date);
+    const d = typeof date === "object" && "toDate" in date
+      ? date.toDate()
+      : new Date(date as string);
     return d.toLocaleString(undefined, { 
       month: 'short', 
       day: 'numeric', 
@@ -27,7 +30,7 @@ const formatDateTime = (date: any) => {
 };
 
 const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
-  const [posts, setPosts] = useState<any[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [userLikes, setUserLikes] = useState<Record<string, boolean>>({});
   const likeListenersRef = useRef<Record<string, () => void>>({});
   const [newPost, setNewPost] = useState("");
@@ -39,7 +42,7 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
   useEffect(() => {
     const q = query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(50));
     const unsubscribePosts = onSnapshot(q, (snapshot) => {
-      const postsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const postsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as Post[];
       setPosts(postsData);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, "posts");
@@ -77,6 +80,10 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
 
   const handleCreatePost = async () => {
     if (!newPost.trim() || !user) return;
+    if (newPost.length > 2000) {
+      toast.error("Post exceeds 2000 characters.");
+      return;
+    }
     setLoading(true);
     const path = "posts";
     try {
@@ -84,7 +91,7 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
         authorUid: user.uid,
         authorName: user.displayName || "Quantum Trader",
         authorAvatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-        content: newPost,
+        content: newPost.trim(),
         likesCount: 0,
         commentsCount: 0,
         createdAt: serverTimestamp(),
@@ -133,6 +140,10 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
 
   const handleComment = async (postId: string) => {
     if (!commentText.trim() || !user) return;
+    if (commentText.length > 1000) {
+      toast.error("Comment exceeds 1000 characters.");
+      return;
+    }
     setLoading(true);
     
     const postRef = doc(db, "posts", postId);
@@ -143,7 +154,7 @@ const CommunityTab: React.FC<CommunityTabProps> = ({ user }) => {
         uid: user.uid,
         authorName: user.displayName || "Quantum Trader",
         authorAvatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-        content: commentText,
+        content: commentText.trim(),
         createdAt: serverTimestamp()
       });
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { auth, googleProvider, facebookProvider, appleProvider, db, handleFirestoreError, OperationType } from "./firebase";
-import { onAuthStateChanged, signInWithPopup } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { onAuthStateChanged, signInWithPopup, type User as FirebaseUser } from "firebase/auth";
+import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { TrendingUp, Shield, Globe, Zap, ArrowRight, Chrome, Facebook, Apple } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Layout from "./components/Layout";
@@ -11,12 +11,12 @@ import TradingTab from "./components/TradingTab";
 import LeaderboardTab from "./components/LeaderboardTab";
 import CommunityTab from "./components/CommunityTab";
 import SettingsTab from "./components/SettingsTab";
-
+import type { UserProfile } from "./types";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { Toaster } from "sonner";
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(0);
 
@@ -66,11 +66,12 @@ const App: React.FC = () => {
                 createdAt: new Date().toISOString(),
               });
             } else {
-              const userData = userSnap.data();
-              const updates: any = {};
+              const userData = userSnap.data() as Partial<UserProfile>;
+              const updates: Partial<UserProfile> = {};
               
               if (!userData?.suiWallet) updates.suiWallet = "Pending Web3 Wallet";
               
+              // Fix corrupted trading state: isTrading=true without a session
               if (userData?.isTrading === true && !userData?.tradingSessionId) {
                 updates.isTrading = false;
               }

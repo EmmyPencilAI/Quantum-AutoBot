@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Copy, Send, ArrowDownLeft, Plus, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
 import { motion } from "motion/react";
 import { getAllBalances, buildTransferOnChainPTB, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
-import { Bell, CheckCircle2, Info, AlertCircle, Link } from "lucide-react";
+import { Bell, CheckCircle2, Info, Link } from "lucide-react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { useInitExecutionAdapter } from "../lib/executionAdapter";
-
+import { apiFetch } from "../lib/api";
 import { toast } from "sonner";
 
 interface WalletTabProps {
@@ -260,37 +260,29 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     setWithdrawing(true);
     toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
-      
+      const walletAddress = withdrawParams.externalAddress || currentAccount?.address;
+      if (!walletAddress) throw new Error("No destination wallet address available.");
 
-      const response = await fetch("/api/wallet/withdraw", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          uid: user.uid,
-          amount,
-          asset: withdrawParams.asset,
-          walletAddress: withdrawParams.externalAddress || currentAccount?.address
-        })
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error("Withdrawal API error:", text);
-        try {
-          const errorData = JSON.parse(text);
-          throw new Error(errorData.error || `Server error: ${response.status}`);
-        } catch (e) {
-          throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
+      // apiFetch automatically attaches the Firebase ID token
+      const result = await apiFetch<{ success: boolean; txHash: string; newWalletBalance: number }>(
+        "/api/wallet/withdraw",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            uid: user.uid,
+            amount,
+            asset: withdrawParams.asset,
+            walletAddress,
+          }),
         }
-      }
+      );
 
-      const result = await response.json();
       if (result.success) {
         toast.success(`Successfully withdrawn ${amount} ${withdrawParams.asset} to your on-chain wallet.`, { id: "withdraw" });
         setShowWithdrawModal(false);
         refreshBalances(address);
       } else {
-        throw new Error(result.error || "Withdrawal failed");
+        throw new Error("Withdrawal failed");
       }
     } catch (e: any) {
       console.error("Withdrawal failed:", e);

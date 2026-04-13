@@ -2,138 +2,164 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ===============================================================
+    // ═══════════════════════════════════════════════════════════════════════
     // Helper Functions
-    // ===============================================================
+    // ═══════════════════════════════════════════════════════════════════════
+
     function isAuthenticated() {
       return request.auth != null;
     }
 
+    // Admin role is set via Firebase Admin SDK custom claims.
+    // Never use hard-coded emails here — email can change or be compromised.
+    // Set admin: firebase-admin auth().setCustomUserClaims(uid, { role: 'admin' })
     function isAdmin() {
       return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "emmanuelobed877@gmail.com" && request.auth.token.email_verified == true));
+        request.auth.token.role == 'admin';
     }
 
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Owner check when uid is stored in the document data
     function isDocOwner() {
       return isAuthenticated() && request.auth.uid == resource.data.uid;
     }
 
+    // Validated user document shape (minimal required fields)
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'displayName', 'suiWallet']) &&
              data.uid is string && data.uid.size() > 0 &&
-             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
-             data.suiWallet is string && data.suiWallet.size() > 0 &&
-             (data.avatar is string || !('avatar' in data)) &&
-             (data.photoURL is string || !('photoURL' in data)) &&
-             (data.email is string || !('email' in data)) &&
-             (data.suiBalance is number || !('suiBalance' in data)) &&
-             (data.usdtBalance is number || !('usdtBalance' in data)) &&
-             (data.usdcBalance is number || !('usdcBalance' in data)) &&
-             (data.walletBalance is number || !('walletBalance' in data)) &&
-             (data.isTrading is bool || !('isTrading' in data)) &&
-             (data.initialInvestment is number || !('initialInvestment' in data)) &&
-             (data.totalProfit is number || !('totalProfit' in data)) &&
-             (data.activeStrategy is string || !('activeStrategy' in data)) &&
-             (data.activePair is string || !('activePair' in data)) &&
-             (data.tradingAsset is string || !('tradingAsset' in data));
+             data.displayName is string &&
+             data.displayName.size() > 0 &&
+             data.displayName.size() < 100 &&
+             data.suiWallet is string &&
+             // Prevent users from granting themselves admin via profile write
+             !('role' in data);
     }
 
     function isValidPost(data) {
       return data.keys().hasAll(['authorUid', 'content', 'createdAt']) &&
              data.authorUid is string &&
-             data.content is string && data.content.size() > 0 && data.content.size() < 2000 &&
-             (data.createdAt is string || data.createdAt is timestamp) &&
-             (data.authorName is string || !('authorName' in data)) &&
-             (data.authorAvatar is string || !('authorAvatar' in data)) &&
-             (data.likesCount is number || !('likesCount' in data)) &&
-             (data.commentsCount is number || !('commentsCount' in data));
+             data.authorUid == request.auth.uid &&  // Can only post as yourself
+             data.content is string &&
+             data.content.size() > 0 &&
+             data.content.size() < 2000 &&
+             (data.createdAt is string || data.createdAt is timestamp);
     }
 
     function isValidComment(data) {
       return data.keys().hasAll(['uid', 'content', 'createdAt']) &&
              data.uid is string &&
-             data.content is string && data.content.size() > 0 && data.content.size() < 1000 &&
-             (data.createdAt is string || data.createdAt is timestamp);
+             data.uid == request.auth.uid &&  // Can only comment as yourself
+             data.content is string &&
+             data.content.size() > 0 &&
+             data.content.size() < 1000;
     }
 
-    function isValidTrade(data) {
-      return data.keys().hasAll(['uid', 'pair', 'type', 'amount', 'price', 'timestamp']) &&
-             data.uid is string &&
-             data.pair is string &&
-             data.type in ['Buy', 'Sell'] &&
-             data.amount is number && data.amount >= 0 &&
-             data.price is number && data.price >= 0 &&
-             (data.timestamp is string || data.timestamp is timestamp);
-    }
-
-    function isValidNotification(data) {
-      return data.keys().hasAll(['uid', 'title', 'message', 'createdAt']) &&
-             data.uid is string &&
-             data.title is string && data.title.size() > 0 &&
-             data.message is string && data.message.size() > 0 &&
-             (data.createdAt is string || data.createdAt is timestamp);
-    }
-
-    // ===============================================================
-    // Collection Rules
-    // ===============================================================
-
-    // Users: Only owner can read/write their own profile.
+    // ═══════════════════════════════════════════════════════════════════════
+    // Users Collection
+    // SECURITY: Users can ONLY read and write their OWN profile.
+    // Leaderboard data is served exclusively by the backend via Admin SDK
+    // (which bypasses these rules). No cross-user profile reads from clients.
+    // ═══════════════════════════════════════════════════════════════════════
     match /users/{userId} {
-      allow read: if isAuthenticated(); // Allow reading other profiles for community/leaderboard
+      allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow delete: if false; // User deletion handled by Admin SDK only
     }
 
-    // Posts: Anyone can read, only authenticated can create, owner can update/delete.
+    // ═══════════════════════════════════════════════════════════════════════
+    // Posts Collection
+    // Community posts are publicly readable.
+    // Users can only create posts with their own uid.
+    // ═══════════════════════════════════════════════════════════════════════
     match /posts/{postId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && isValidPost(request.resource.data);
-      allow update: if isAuthenticated() && (
-        (request.auth.uid == resource.data.authorUid || isAdmin()) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'commentsCount']) && 
-         (math.abs(request.resource.data.likesCount - resource.data.likesCount) == 1 || 
-          request.resource.data.commentsCount == resource.data.commentsCount + 1 ||
-          math.abs(request.resource.data.commentsCount - resource.data.commentsCount) == 1))
-      );
-      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorUid || isAdmin());
+      allow read: if true; // Public community feed
 
-      // Comments subcollection
+      allow create: if isAuthenticated() && isValidPost(request.resource.data);
+
+      allow update: if isAuthenticated() && (
+        // Author or admin can do a full edit
+        (request.auth.uid == resource.data.authorUid || isAdmin()) ||
+        // Any authenticated user can ONLY increment/decrement likesCount or commentsCount
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'commentsCount']) &&
+          (
+            math.abs(request.resource.data.likesCount - resource.data.likesCount) == 1 ||
+            math.abs(request.resource.data.commentsCount - resource.data.commentsCount) == 1
+          )
+        )
+      );
+
+      allow delete: if isAuthenticated() &&
+                    (request.auth.uid == resource.data.authorUid || isAdmin());
+
+      // Comments sub-collection
       match /comments/{commentId} {
         allow read: if true;
         allow create: if isAuthenticated() && isValidComment(request.resource.data);
-        allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.uid || isAdmin());
+        allow update, delete: if isAuthenticated() &&
+                               (request.auth.uid == resource.data.uid || isAdmin());
       }
 
-      // Likes subcollection
+      // Likes sub-collection — each user manages their own like document
       match /likes/{userId} {
         allow read: if true;
-        allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+        allow write: if isOwner(userId);
       }
     }
 
-    // Trades: Anyone can read (for leaderboard), only system/owner can create.
+    // ═══════════════════════════════════════════════════════════════════════
+    // Trades Collection
+    // PRIVACY: Trades are ONLY readable by the owning user.
+    // The global activity feed is served by the backend Admin SDK.
+    // Trades are immutable — no client-side updates or deletes.
+    // ═══════════════════════════════════════════════════════════════════════
     match /trades/{tradeId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && isValidTrade(request.resource.data);
-      allow update: if false; // Trades are immutable records
-      allow delete: if false;
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.uid;
+      allow create: if isAuthenticated() &&
+                    request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false; // Trades are immutable once written
     }
 
-    // Notifications: Only owner can read/write their own notifications.
+    // ═══════════════════════════════════════════════════════════════════════
+    // Notifications Collection
+    // Users can read, mark-as-read, or delete their own notifications.
+    // ONLY the server (Admin SDK) can create notifications.
+    // ═══════════════════════════════════════════════════════════════════════
     match /notifications/{notificationId} {
-      allow read: if isOwner(resource.data.uid);
-      allow create: if isAuthenticated(); // System can create notifications for users
-      allow update: if isOwner(resource.data.uid);
-      allow delete: if isOwner(resource.data.uid);
+      allow read:   if isDocOwner();
+      allow create: if false; // Server-only via Admin SDK (bypasses rules)
+      allow update: if isDocOwner() &&
+                    // Clients can only toggle the 'read' field
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if isDocOwner();
     }
 
-    // Default deny
+    // ═══════════════════════════════════════════════════════════════════════
+    // Trade Intents Collection
+    // Users can read their own intents.
+    // ALL create/update operations are server-only (Admin SDK).
+    // ═══════════════════════════════════════════════════════════════════════
+    match /trade_intents/{intentId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.uid;
+      allow create, update, delete: if false; // Server-only
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Health Check — Server-only
+    // ═══════════════════════════════════════════════════════════════════════
+    match /health_check/{docId} {
+      allow read, write: if false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Default Deny All
+    // Any collection not explicitly matched above is denied.
+    // ═══════════════════════════════════════════════════════════════════════
     match /{path=**} {
       allow read, write: if false;
     }

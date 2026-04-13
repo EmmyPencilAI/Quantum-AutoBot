@@ -3,6 +3,8 @@ import { User, Bell, Shield, Wallet, LogOut, Check, ChevronRight, Camera, Globe,
 import { auth, db } from "../firebase";
 import { updateProfile } from "firebase/auth";
 import { doc, updateDoc } from "firebase/firestore";
+import { toast } from "sonner";
+import { apiFetch } from "../lib/api";
 
 interface SettingsTabProps {
   user: any;
@@ -22,9 +24,10 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ user }) => {
       await updateProfile(user, { displayName: username });
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, { username });
-      alert("Profile updated successfully!");
-    } catch (e) {
+      toast.success("Profile updated successfully!");
+    } catch (e: any) {
       console.error("Error updating profile:", e);
+      toast.error("Profile update failed: " + (e.message || "Unknown error"));
     } finally {
       setLoading(false);
     }
@@ -38,9 +41,10 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ user }) => {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, { avatar: avatarUrl });
       setShowAvatarGrid(false);
-      alert("Avatar updated successfully!");
-    } catch (e) {
+      toast.success("Avatar updated!");
+    } catch (e: any) {
       console.error("Error updating avatar:", e);
+      toast.error("Avatar update failed: " + (e.message || "Unknown error"));
     } finally {
       setLoading(false);
     }
@@ -52,11 +56,12 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ user }) => {
   const checkSystemStatus = async () => {
     setCheckingStatus(true);
     try {
-      const response = await fetch("/api/admin/status");
-      const data = await response.json();
+      // Requires admin token — uses apiFetch for Authorization header
+      const data = await apiFetch("/api/admin/status");
       setSystemStatus(data);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error checking system status:", e);
+      toast.error("Status check failed: " + (e.message || "Admin access required"));
     } finally {
       setCheckingStatus(false);
     }

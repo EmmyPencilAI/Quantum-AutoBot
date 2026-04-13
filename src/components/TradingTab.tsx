@@ -8,7 +8,7 @@ import { buildTransferOnChainPTB, buildStartSessionPTB, buildWithdrawSessionPTB,
 import { buildPTBFromTradeInstruction } from "../lib/tradeInstructions";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useInitExecutionAdapter } from "../lib/executionAdapter";
-
+import { apiFetch } from "../lib/api";
 import { toast } from "sonner";
 
 interface TradingTabProps {
@@ -55,16 +55,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
     });
 
-    // Fetch trade history for chart and activity feed
+    // Fetch only THIS user's trade history — never read other users' trades
     const tradesRef = collection(db, "trades");
     const q = query(
       tradesRef,
+      where("uid", "==", user.uid),   // PRIVACY: scoped to current user only
       orderBy("timestamp", "desc"),
-      limit(500)
+      limit(200)
     );
 
     const unsubscribeTrades = onSnapshot(q, (snapshot) => {
-      const allTrades = snapshot.docs.map(doc => ({
+      const userTrades = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         time: new Date(doc.data().timestamp).toLocaleString(undefined, { 
@@ -74,19 +75,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           minute: '2-digit' 
         }),
         value: doc.data().pnl
-      }));
-
-      const userTrades = allTrades.filter((t: any) => t.uid === user.uid).reverse();
+      })).reverse();
       
-      // If we have trades, use them for the chart. 
-      if (userTrades.length > 0) {
-        setHistory(userTrades);
-      } else {
-        setHistory([{ time: "Start", value: 0 }]);
-      }
-
-      // Also update global activity from the same snapshot to be efficient
-      setGlobalActivity(allTrades.slice(0, 200));
+      setHistory(userTrades.length > 0 ? userTrades : [{ time: "Start", value: 0 }]);
+      setGlobalActivity(userTrades.slice(0, 50)); // Only own trades in activity feed
     }, (error) => {
       console.error("Error fetching trade history:", error);
     });
@@ -139,28 +131,24 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             throw new Error("On-chain settlement failed or was rejected");
           }
           
-          const response = await fetch("/api/trading/settle", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ uid: user.uid, walletAddress: currentAccount?.address })
-          });
-          if (!response.ok) {
-            const text = await response.text();
-            console.error("Settlement API error:", text);
-            try {
-              const errorData = JSON.parse(text);
-              throw new Error(errorData.error || `Server error: ${response.status}`);
-            } catch (e) {
-              throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
+          // apiFetch sends Firebase ID token in Authorization header
+          const result = await apiFetch<{ success: boolean; totalToUser: number; txHash: string | null }>(
+            "/api/trading/settle",
+            {
+              method: "POST",
+              body: JSON.stringify({ uid: user.uid, walletAddress: currentAccount?.address }),
             }
-          }
-
-          const result = await response.json();
+          );
           if (result.success) {
             console.log("Settlement successful:", result);
-            toast.success("Settlement successful! Funds returned to wallet.", { id: "settle" });
+            toast.success(
+              `Settlement complete! ${result.totalToUser?.toFixed(2)} USD returned to wallet.${
+                result.txHash ? ` TX: ${result.txHash.slice(0, 12)}...` : ""
+              }`,
+              { id: "settle" }
+            );
           } else {
-            throw new Error(result.error || "Settlement failed");
+            throw new Error("Settlement failed");
           }
         }
       } else {
@@ -242,26 +230,19 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         toast.success("Withdrawal successful! (Demo mode)", { id: "withdraw" });
       } else {
         try {
-          const response = await fetch("/api/wallet/withdraw", {
+          await apiFetch("/api/wallet/withdraw", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               uid: user.uid,
               amount,
               asset: withdrawAsset,
-              walletAddress: withdrawAddress
-            })
+              walletAddress: withdrawAddress,
+            }),
           });
-
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || "Backend withdrawal failed.");
-          }
-          
           toast.success("Withdrawal successfully submitted to network!", { id: "withdraw" });
         } catch (e: any) {
           console.error("Withdrawal error:", e);
-          toast.error(e.message || "Withdrawal failed on the network.", { id: "withdraw" });
+          toast.error(e.message || "Withdrawal failed.", { id: "withdraw" });
         }
       }
       
@@ -314,25 +295,20 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
         const actionType = tradingAsset === "SUI" ? "START_SESSION" : "DEPOSIT";
         
-        // 1. AI Decision happens backend via API Intent
-        const intentRes = await fetch("/api/trade/execute-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            uid: user.uid,
-            action: actionType,
-            asset: tradingAsset,
-            amount: amount,
-            strategyId: strategy
-          })
-        });
-
-        if (!intentRes.ok) {
-          const text = await intentRes.text();
-          throw new Error(JSON.parse(text).error || "Failed to fetch intent from backend");
-        }
-        
-        const { instruction } = await intentRes.json();
+        // 1. Request trade intent from backend (requires authenticated user)
+        const { instruction } = await apiFetch<{ instruction: any }>(
+          "/api/trade/execute-intent",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              uid: user.uid,
+              action: actionType,
+              asset: tradingAsset,
+              amount: amount,
+              strategyId: strategy,
+            }),
+          }
+        );
         
         // 2. Build the exact PTB via Frontend mapping using the connected Wallet
         const senderAddress = currentAccount.address;
@@ -355,16 +331,15 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           sessionId = sessionObject.objectId;
         }
 
-        // 4. Sync Result Back to Backend
-        await fetch("/api/trade/sync-result", {
+        // 4. Sync verified on-chain result back to backend
+        await apiFetch("/api/trade/sync-result", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             uid: user.uid,
             intentId: instruction.intentId,
             digest: result.digest,
-            success: true
-          })
+            success: true,
+          }),
         });
 
         const userRef = doc(db, "users", user.uid);
@@ -400,7 +375,7 @@ const changeStrategy = async (newStrategy: string) => {
       });
     } catch (e: any) {
       console.error("Strategy change failed:", e);
-      alert("Strategy change failed: " + (e.message || "Unknown error"));
+      toast.error("Strategy change failed: " + (e.message || "Unknown error"));
     }
   };
 
@@ -414,7 +389,7 @@ const changeStrategy = async (newStrategy: string) => {
       });
     } catch (e: any) {
       console.error("Pair change failed:", e);
-      alert("Pair change failed: " + (e.message || "Unknown error"));
+      toast.error("Pair change failed: " + (e.message || "Unknown error"));
     }
   };
 
@@ -450,16 +425,21 @@ const changeStrategy = async (newStrategy: string) => {
           toast.success(`Successfully withdrawn to wallet! (Demo mode)`, { id: "withdraw-profit" });
         } else {
           try {
-            const response = await fetch("/api/trading/withdraw-profit", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ uid: user.uid, walletAddress: currentAccount?.address })
-            });
-            const result = await response.json();
+            const result = await apiFetch<{ success: boolean; withdrawn: number }>(
+              "/api/trading/withdraw-profit",
+              {
+                method: "POST",
+                body: JSON.stringify({ uid: user.uid, walletAddress: currentAccount?.address }),
+              }
+            );
             if (result.success) {
-               toast.success(`Successfully withdrawn ${result.withdrawn?.toFixed(2)} to wallet balance!`, { id: "withdraw-profit" });
+              toast.success(`Withdrawn ${result.withdrawn?.toFixed(2)} to wallet balance!`, { id: "withdraw-profit" });
             }
-          } catch(e: any) { console.error("Backend failed:", e); toast.error(e.message || "Backend failed", { id: "withdraw-profit" }); } }
+          } catch (e: any) {
+            console.error("Profit withdrawal failed:", e);
+            toast.error(e.message || "Profit withdrawal failed", { id: "withdraw-profit" });
+          }
+        }
       } catch (e: any) {
         console.error("Profit withdrawal failed:", e);
         toast.error(e.message || "Withdrawal failed", { id: "withdraw-profit" });

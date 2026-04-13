@@ -6,3 +6,19 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Firebase config — contains project ID and app ID, keep out of source control
+# Inject these values via environment variables in CI/CD and production
+firebase-applet-config.json
+
+# One-off migration / fix scripts — should not be in version control
+fix_trading.mjs
+fix_trading_2.mjs
+fix_withdraw.cjs
+fix.cjs
+reset_balance.cjs
+cleaner.mjs
+
+# TypeScript error logs
+typescript-errors.txt
+ts_errors.txt

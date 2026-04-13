@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -15,293 +15,39 @@ import { fromHex } from "@mysten/sui/utils";
 
 dotenv.config();
 
-// Helper to decode Sui private key (handles both hex and suiprivkey format)
+// ─── Type Extensions ──────────────────────────────────────────────────────────
+interface AuthRequest extends Request {
+  uid?: string;
+  userEmail?: string;
+  isAdmin?: boolean;
+}
+
+// ─── Sui Config ───────────────────────────────────────────────────────────────
 function decodeSuiPrivateKey(key: string): Uint8Array {
   const cleanKey = key.trim();
   if (cleanKey.startsWith("suiprivkey")) {
     const { secretKey } = decodeSuiPrivateKeySDK(cleanKey);
     return secretKey;
   }
-  // Remove 0x prefix if present and decode hex
   return fromHex(cleanKey.replace("0x", ""));
 }
 
-// Sui Client for Backend
 const suiClient = new SuiClient({ url: getFullnodeUrl("testnet") } as any);
-
-// Load Firebase Config
-const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
-let db: any = null;
-
-if (fs.existsSync(firebaseConfigPath)) {
-  try {
-    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-    
-    if (!admin.apps.length) {
-      try {
-        // Prioritize explicit projectId from config to avoid connecting to the wrong project
-        admin.initializeApp({
-          projectId: firebaseConfig.projectId,
-        });
-        console.log(`Firebase Admin initialized with explicit projectId: ${firebaseConfig.projectId}`);
-      } catch (e) {
-        console.warn("Explicit Firebase Admin initialization failed, trying default:", e);
-        try {
-          admin.initializeApp();
-          console.log("Firebase Admin initialized with default environment config");
-        } catch (e2) {
-          console.error("Critical: Firebase Admin initialization failed completely:", e2);
-        }
-      }
-    }
-    
-    const adminApp = admin.app();
-    // Use the named database if provided, otherwise default
-    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-    
-    try {
-      db = getFirestore(adminApp, dbId);
-      // Test the connection immediately with a write operation
-      await db.collection("health_check").doc("ping").set({ 
-        lastPing: new Date().toISOString(),
-        projectId: firebaseConfig.projectId,
-        databaseId: dbId
-      });
-      console.log(`Firebase Admin connected successfully to database: ${dbId}`);
-    } catch (e: any) {
-      console.error(`Failed to connect to named database ${dbId}, falling back to (default):`, e.message);
-      try {
-        db = getFirestore(adminApp, "(default)");
-        await db.collection("health_check").doc("ping").set({ 
-          lastPing: new Date().toISOString(),
-          projectId: firebaseConfig.projectId,
-          databaseId: "(default)"
-        });
-        console.log("Firebase Admin connected successfully to (default) database");
-      } catch (e2: any) {
-        console.error("Critical: Failed to connect to both named and (default) databases:", e2.message);
-      }
-    }
-    
-    console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
-  } catch (e) {
-    console.error("Critical failure during Firebase Admin initialization:", e);
-  }
-}
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Community Bot Logic
-const BOT_MESSAGES = [
-  "🚀 Quantum Alpha strategy just hit a 15% gain on BTC/USDT!",
-  "📈 Market update: BTC showing strong support at 65k. Momentum strategy looking good!",
-  "📉 Market Sentiment: Bullish on Sui ecosystem tokens.",
-  "🤖 Quantum Bot: Successfully settled 124 trades in the last hour.",
-  "🌊 Liquidity Update: Sui Network TVL reaching new heights!",
-  "⚡ Instant Settlement: Average trade settlement time is now under 2 seconds.",
-  "🛡️ Security: All trades are secured by zkLogin and non-custodial smart contracts.",
-  "🌟 New Milestone: 10,000 active traders now using Quantum Finance!",
-  "📊 Strategy Update: Momentum strategy is currently outperforming others by 8%.",
-  "🔥 Hot Pair: SUI/USDT volume is up 45% in the last 24 hours!",
-  "💎 New trading pair added: SOL/USDT. Check it out in the dashboard.",
-  "💰 Quantum Treasury just settled 500 USDT in profits. Distributed 50/50!",
-  "Strategy Tip: Aggressive strategy works best in high volatility markets.",
-  "Welcome to the Quantum Finance community! Share your insights below.",
-  "Leaderboard update: Top trader just hit +10,000 USDT profit!",
-  "Quantum Finance is now fully integrated with Sui Testnet.",
-  "Did you know? Our Quantum engine uses advanced AI to optimize trade entries.",
-];
-
-const WHALE_ALERTS = [
-  "🚨 WHALE ALERT: 500,000 USDT moved from unknown wallet to Quantum Treasury!",
-  "🚨 WHALE ALERT: 300,000 USDT position opened on ETH/USDT using Aggressive Strategy!",
-  "🚨 WHALE ALERT: 100,000 USDT profit settled by top trader on SOL/USDT!",
-  "🚨 WHALE ALERT: 250,000 USDT liquidity added to SUI/USDT pool!",
-  "🚨 WHALE ALERT: 500,000 USDT trade executed on BTC/USDT. Market volatility increasing!",
-  "🚨 WHALE ALERT: 300,000 USDT funding received for high-frequency trading session!",
-  "🚨 WHALE ALERT: 100,000 USDT profit shared with community treasury!",
-  "🐋 WHALE ALERT: 500,000 USDT just bridged from Ethereum to Sui via Quantum!",
-  "🐋 WHALE ALERT: 300,000 USDT just deposited into a high-yield Quantum strategy!",
-  "🐋 WHALE ALERT: 100,000 USDT just realized by a top Quantum trader!",
-  "🐋 WHALE ALERT: 500,000 USDT liquidity just moved into Quantum Alpha pool!",
-  "🐋 WHALE ALERT: 300,000 USDT just entered a long position on ETH/USDT!",
-];
-
-async function postBotMessage() {
-  if (!db) {
-    console.warn("Bot skipped post: Firestore Admin not initialized");
-    return;
-  }
-  try {
-    const isWhale = Math.random() < 0.3;
-    const message = isWhale 
-      ? WHALE_ALERTS[Math.floor(Math.random() * WHALE_ALERTS.length)]
-      : BOT_MESSAGES[Math.floor(Math.random() * BOT_MESSAGES.length)];
-    
-    const postData = {
-      authorUid: "system-bot",
-      authorName: "Quantum Bot",
-      authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
-      authorWallet: "0x0000000000000000000000000000000000000000",
-      content: message,
-      likesCount: Math.floor(Math.random() * 10),
-      commentsCount: 0,
-      createdAt: new Date().toISOString()
-    };
-    
-    console.log("Bot (Admin SDK) attempting to post:", JSON.stringify(postData));
-    await db.collection("posts").add(postData);
-    console.log("Bot (Admin SDK) posted successfully:", message);
-  } catch (error: any) {
-    console.error("Bot (Admin SDK) failed to post:", error.message || error);
-  }
-}
-
-// Post every 15 minutes
-if (db) {
-  setInterval(postBotMessage, 900000);
-  // Post one immediately on start
-  setTimeout(postBotMessage, 5000);
-}
-
-// Background Trading Engine (Task 2: AI Trading Loop + Threat/Opportunity Index)
-async function processBackgroundTrades() {
-  if (!db) return;
-  
-  try {
-    const usersRef = db.collection("users");
-    // Ensure the collection exists by attempting a simple get
-    try {
-      await usersRef.limit(1).get();
-    } catch (e: any) {
-      if (e.code === 5 || e.message?.includes("NOT_FOUND")) {
-        console.warn("Firestore collection 'users' not found or initialized yet. Skipping background trades.");
-        return;
-      }
-      throw e;
-    }
-    
-    const tradingUsers = await usersRef.where("isTrading", "==", true).get();
-    
-    if (tradingUsers.empty) {
-      if (Math.random() < 0.05) {
-        await postBotMessage();
-      }
-      return;
-    }
-    
-    console.log(`Processing AI Trading Loop for ${tradingUsers.size} active sessions...`);
-    
-    const batch = db.batch();
-    const now = new Date().toISOString();
-    
-    for (const userDoc of tradingUsers.docs) {
-      const userData = userDoc.data();
-      const strategy = userData.activeStrategy || "Momentum";
-      
-      // Feature 2.1: Dynamic Threat/Opportunity Index (0-100)
-      const marketVolatility = Math.random() * 100;
-      const opportunityIndex = Math.random() * 100;
-      const threatIndex = Math.random() * 100;
-      
-      let baseYield = 0;
-      
-      // Feature 2.2: Strategy-specific threshold execution algorithms
-      if (strategy === "Aggressive") {
-        if (opportunityIndex > 60) baseYield = 0.005; // 0.5% gain
-        if (threatIndex > 80) baseYield = -0.007;     // Drawdown
-      } else if (strategy === "Momentum") {
-        if (opportunityIndex > 50 && marketVolatility > 40) baseYield = 0.003;
-        if (threatIndex > 70) baseYield = -0.004;
-      } else if (strategy === "Scalping") {
-        if (marketVolatility > 70) baseYield = 0.0015; // Thrives in volatility
-        if (threatIndex > 85) baseYield = -0.002;
-      } else if (strategy === "Conservative") {
-        if (opportunityIndex > 40 && threatIndex < 50) baseYield = 0.0005;
-        if (threatIndex > 60) baseYield = -0.0002;    // Very low risk
-      }
-      
-      // Randomize the yield slightly to avoid uniform increments
-      const profitFactor = baseYield * (0.8 + Math.random() * 0.4); 
-      
-      const tradingAsset = userData.tradingAsset || "USDT";
-      const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
-      const currentAssetBalance = userData[balanceField] || 0;
-
-      const actualProfit = currentAssetBalance * profitFactor;
-      const newBalance = currentAssetBalance + actualProfit;
-      const newTotalProfit = (userData.totalProfit || 0) + actualProfit;
-      
-      batch.update(userDoc.ref, {
-        [balanceField]: newBalance,
-        totalProfit: newTotalProfit,
-        lastTradeAt: now,
-        // Sync market metrics back to UI
-        opportunityIndex,
-        threatIndex,
-        marketVolatility
-      });
-      
-      // Feature 2.3: Push Trade Intents ("BUY"/"SELL") internally based on the algorithm decision
-      if (Math.abs(profitFactor) > 0.0001) {
-        const tradeRef = db.collection("trades").doc();
-        const tradeAmount = Math.abs(currentAssetBalance * profitFactor * (strategy === "Aggressive"? 5 : 2));
-        const actionType = profitFactor > 0 ? "BUY" : "SELL";
-        
-        batch.set(tradeRef, {
-          uid: userData.uid,
-          pair: userData.activePair || "BTC/USDT",
-          type: actionType, // Corresponds to TradeInstruction schema
-          amount: tradeAmount,
-          asset: tradingAsset,
-          price: 65000 + (Math.random() * 1000 - 500),
-          pnl: actualProfit,
-          opportunityIndex,
-          threatIndex,
-          duration: Math.floor(Math.random() * 60) + 10,
-          timestamp: now
-        });
-
-        if (tradeAmount > 500) {
-          const tradeMsg = `🤖 AI Strategy Execution: ${userData.displayName || 'A trader'} strategy executed a ${tradeAmount.toFixed(2)} ${tradingAsset} ${actionType} on ${userData.activePair || 'BTC/USDT'} (Opportunity: ${opportunityIndex.toFixed(0)}, Threat: ${threatIndex.toFixed(0)})!`;
-          const postRef = db.collection("posts").doc();
-          batch.set(postRef, {
-            authorUid: "system-bot",
-            authorName: "Quantum Bot",
-            authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
-            authorWallet: "0x0000000000000000000000000000000000000000",
-            content: tradeMsg,
-            likesCount: 0,
-            commentsCount: 0,
-            createdAt: now
-          });
-        }
-      }
-    }
-    
-    await batch.commit();
-    console.log(`✅ AI Trading Loop settled for ${tradingUsers.size} users. Metrics processed.`);
-  } catch (error: any) {
-    console.error("Error in background trading loop:", error.message || error);
-    if (error.code === 7 || error.message?.includes("PERMISSION_DENIED")) {
-      console.error("CRITICAL: Permission denied in background trading loop. Check Firebase Admin credentials and project permissions.");
-    } else if (error.code === 5 || error.message?.includes("NOT_FOUND")) {
-      console.warn("Firestore collection not found or initialized yet. Skipping background trades.");
-    }
-  }
-}
-
-// Run background trading every 5 seconds for real-time feel
-if (db) {
-  setInterval(processBackgroundTrades, 5000);
-}
-
-// Sui Config (Mirroring src/lib/sui.ts)
-const SUI_RPC_URL = "https://fullnode.testnet.sui.io:443";
 const SUI_TYPE = "0x2::sui::SUI";
+const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad::coin::COIN";
+const USDC_TYPE = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC";
 const SUI_CONTRACT_ADDRESS = process.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
 const SUI_TREASURY_ADDRESS = process.env.VITE_SUI_TREASURY_ADDRESS || "0x40e4e861562d786bbdc68e2ace97b579a6022e8a1d9bad850112138c301e0e41";
+
+async function getDecimals(coinType: string): Promise<number> {
+  if (coinType.includes("sui::SUI")) return 9;
+  try {
+    const metadata = await suiClient.getCoinMetadata({ coinType });
+    return metadata?.decimals ?? 6;
+  } catch {
+    return 6;
+  }
+}
 
 async function findAdminCap(address: string): Promise<string | null> {
   try {
@@ -310,829 +56,1003 @@ async function findAdminCap(address: string): Promise<string | null> {
       filter: { StructType: `${SUI_CONTRACT_ADDRESS}::trading::AdminCap` },
     });
     return objects.data[0]?.data?.objectId || null;
-  } catch (e) {
-    console.error("Error finding AdminCap:", e);
+  } catch {
     return null;
   }
 }
 
-// USDT on Sui Testnet
-const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f20935055b45c2ad::coin::COIN";
-// USDC on Sui Testnet
-const USDC_TYPE = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC";
+// ─── Firebase Admin ───────────────────────────────────────────────────────────
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+let db: admin.firestore.Firestore | null = null;
 
-async function getDecimals(coinType: string): Promise<number> {
-  if (coinType === SUI_TYPE || coinType.includes("sui::SUI")) return 9;
+if (fs.existsSync(firebaseConfigPath)) {
   try {
-    const metadata = await suiClient.getCoinMetadata({ coinType });
-    return metadata?.decimals ?? 6;
+    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+    if (!admin.apps.length) {
+      admin.initializeApp({ projectId: firebaseConfig.projectId });
+    }
+    const adminApp = admin.app();
+    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+    try {
+      db = getFirestore(adminApp, dbId);
+      await db.collection("health_check").doc("ping").set({
+        lastPing: new Date().toISOString(),
+        projectId: firebaseConfig.projectId,
+        databaseId: dbId,
+      });
+      console.log(`✅ Firebase Admin connected to database: ${dbId}`);
+    } catch (e: any) {
+      console.error(`Failed to connect to named database ${dbId}:`, e.message);
+      try {
+        db = getFirestore(adminApp, "(default)");
+        console.log("Firebase Admin connected to (default) database");
+      } catch (e2: any) {
+        console.error("Critical: All Firebase connections failed:", e2.message);
+      }
+    }
   } catch (e) {
-    console.error("Error fetching coin metadata:", e);
-    return 6;
+    console.error("Firebase Admin initialization failed:", e);
   }
 }
 
+// ─── Auth Middleware ──────────────────────────────────────────────────────────
+
+/**
+ * Verifies Firebase ID token from the Authorization: Bearer header.
+ * Attaches uid, userEmail, isAdmin to the request object.
+ */
+async function verifyFirebaseToken(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Unauthorized: Missing or invalid Authorization header" });
+    return;
+  }
+  const idToken = authHeader.split("Bearer ")[1];
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    req.uid = decoded.uid;
+    req.userEmail = decoded.email;
+    // Admin role must be set via Admin SDK custom claims or ADMIN_EMAIL env var
+    req.isAdmin =
+      decoded.role === "admin" ||
+      (!!process.env.ADMIN_EMAIL &&
+        decoded.email === process.env.ADMIN_EMAIL &&
+        decoded.email_verified === true);
+    next();
+  } catch (error: any) {
+    console.error("Token verification failed:", error.code || error.message);
+    res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
+  }
+}
+
+/**
+ * Ensures the authenticated uid matches the uid in the request body.
+ * Admins can bypass this check.
+ */
+function requireSelfOrAdmin(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  const requestedUid = req.body?.uid || req.params?.uid;
+  if (!requestedUid) {
+    res.status(400).json({ error: "Missing uid in request" });
+    return;
+  }
+  if (req.uid !== requestedUid && !req.isAdmin) {
+    res.status(403).json({ error: "Forbidden: You can only access your own resources" });
+    return;
+  }
+  next();
+}
+
+// ─── In-Memory Rate Limiter ───────────────────────────────────────────────────
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+function rateLimit(maxRequests: number, windowMs: number) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
+    const now = Date.now();
+    const existing = rateLimitStore.get(ip);
+    if (!existing || now > existing.resetAt) {
+      rateLimitStore.set(ip, { count: 1, resetAt: now + windowMs });
+      next();
+      return;
+    }
+    if (existing.count >= maxRequests) {
+      res.status(429).json({ error: "Too many requests. Please slow down." });
+      return;
+    }
+    existing.count++;
+    next();
+  };
+}
+
+// Clean up stale rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of rateLimitStore.entries()) {
+    if (now > val.resetAt) rateLimitStore.delete(key);
+  }
+}, 5 * 60 * 1000);
+
+// ─── Live Price Engine ────────────────────────────────────────────────────────
+interface MarketPrices {
+  bitcoin?: { usd: number; usd_24h_change: number };
+  ethereum?: { usd: number; usd_24h_change: number };
+  solana?: { usd: number; usd_24h_change: number };
+  sui?: { usd: number; usd_24h_change: number };
+  binancecoin?: { usd: number; usd_24h_change: number };
+}
+
+let priceCache: MarketPrices | null = null;
+let priceCachedAt = 0;
+const PRICE_TTL_MS = 30_000; // refresh every 30 seconds
+
+async function fetchLivePrices(): Promise<MarketPrices | null> {
+  const now = Date.now();
+  if (priceCache && now - priceCachedAt < PRICE_TTL_MS) return priceCache;
+  try {
+    const apiKey = process.env.COINGECKO_API_KEY;
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (apiKey) headers["x-cg-demo-api-key"] = apiKey;
+    const res = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,sui,binancecoin&vs_currencies=usd&include_24hr_change=true",
+      { headers }
+    );
+    if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
+    const data = await res.json();
+    priceCache = data;
+    priceCachedAt = now;
+    console.log(`✅ Price data refreshed. BTC: $${data.bitcoin?.usd}`);
+    return priceCache;
+  } catch (e: any) {
+    console.warn("⚠️ Price fetch failed, using stale cache:", e.message);
+    return priceCache; // Return stale rather than null when possible
+  }
+}
+
+/** Maps a trading pair symbol to the correct CoinGecko key */
+function get24hChangeForPair(pair: string, prices: MarketPrices): number {
+  const base = pair.split("/")[0].trim().toLowerCase();
+  const mapping: Record<string, keyof MarketPrices> = {
+    btc: "bitcoin",
+    eth: "ethereum",
+    sol: "solana",
+    sui: "sui",
+    bnb: "binancecoin",
+  };
+  const key = mapping[base] || "bitcoin";
+  return prices[key]?.usd_24h_change ?? 0;
+}
+
+/**
+ * Computes strategy-specific per-cycle yield from real 24h price change.
+ * Each cycle is 5 seconds. 86400s/day ÷ 5s = 17,280 cycles/day.
+ * The yield is derived from actual market data, not random numbers.
+ */
+function computeStrategyYield(strategy: string, pair24hChange: number): number {
+  const CYCLES_PER_DAY = 17_280;
+  const perCycleBase = (pair24hChange / 100) / CYCLES_PER_DAY;
+
+  switch (strategy) {
+    case "Aggressive":
+      // 2× leverage — amplifies both gains and losses
+      return perCycleBase * 2;
+    case "Momentum":
+      // Only rides clear trends (>1% daily threshold)
+      return Math.abs(pair24hChange) > 1 ? perCycleBase : perCycleBase * 0.1;
+    case "Scalping":
+      // Profits from absolute volatility regardless of direction
+      return (Math.abs(pair24hChange) / 100) / CYCLES_PER_DAY * 0.7;
+    case "Conservative":
+      // 0.25× leverage — heavily dampened exposure
+      return perCycleBase * 0.25;
+    default:
+      return 0;
+  }
+}
+
+// Warm the price cache on server start
+fetchLivePrices().catch(console.error);
+
+// ─── Community Bot ────────────────────────────────────────────────────────────
+const BOT_MESSAGES = [
+  "📈 Real-time AI signals processing live blockchain data.",
+  "🌊 Liquidity Update: Sui Network TVL remains stable under current market conditions.",
+  "⚡ Settlement: Average trade settlement time under 2 seconds on Sui Testnet.",
+  "🛡️ Security: All trades secured by zkLogin and non-custodial smart contracts.",
+  "📊 Momentum strategy showing signal alignment with current market data.",
+  "Strategy Tip: Aggressive strategy amplifies market moves — suitable for volatile conditions.",
+  "Did you know? Quantum uses live CoinGecko market data for all trading signals.",
+  "Risk Warning: Trading carries risk. Never invest more than you can afford to lose.",
+  "Quantum Finance is live on Sui Testnet. Mainnet audit in progress.",
+];
+
+const WHALE_ALERTS = [
+  "🐋 Large wallet activity detected on Sui network. Monitor for volatility.",
+  "📊 On-chain analytics: Elevated USDT bridge volume in the last hour.",
+  "🔍 Multiple large positions detected across BTC/USDT pairs.",
+  "⚠️ Volatility Alert: BTC showing increased order book depth changes.",
+];
+
+async function postBotMessage(): Promise<void> {
+  if (!db) return;
+  try {
+    const isWhale = Math.random() < 0.2;
+    const message = isWhale
+      ? WHALE_ALERTS[Math.floor(Math.random() * WHALE_ALERTS.length)]
+      : BOT_MESSAGES[Math.floor(Math.random() * BOT_MESSAGES.length)];
+    await db.collection("posts").add({
+      authorUid: "system-bot",
+      authorName: "Quantum Bot",
+      authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
+      authorWallet: "0x0000000000000000000000000000000000000000",
+      content: message,
+      likesCount: 0,       // Never manufacture fake engagement
+      commentsCount: 0,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error("Bot post failed:", error.message);
+  }
+}
+
+if (db) {
+  setInterval(postBotMessage, 15 * 60 * 1000); // Every 15 minutes
+  setTimeout(postBotMessage, 10_000);           // One post 10s after startup
+}
+
+// ─── Real Data-Driven Background Trading Engine ───────────────────────────────
+async function processBackgroundTrades(): Promise<void> {
+  if (!db) return;
+
+  // Require live price data — NEVER simulate without it
+  const prices = await fetchLivePrices();
+  if (!prices) {
+    console.warn("⏭️  Skipping trade cycle: no live price data available");
+    return;
+  }
+
+  try {
+    const usersRef = db.collection("users");
+    const tradingUsers = await usersRef.where("isTrading", "==", true).get();
+    if (tradingUsers.empty) return;
+
+    console.log(`⚡ Processing ${tradingUsers.size} active trading session(s)...`);
+
+    const batch = db.batch();
+    const now = new Date().toISOString();
+
+    for (const userDoc of tradingUsers.docs) {
+      const userData = userDoc.data();
+      const strategy = userData.activeStrategy || "Momentum";
+      const activePair = userData.activePair || "BTC / USDT";
+      const tradingAsset = userData.tradingAsset || "USDT";
+      const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+      const currentBalance = userData[balanceField] || 0;
+
+      if (currentBalance <= 0) continue; // No balance, no trades
+
+      // Compute data-driven yield using real market signal
+      const pair24hChange = get24hChangeForPair(activePair, prices);
+      const yieldRate = computeStrategyYield(strategy, pair24hChange);
+      const cyclePnl = currentBalance * yieldRate;
+      const newBalance = Math.max(0, currentBalance + cyclePnl); // Floor at 0
+      const newTotalProfit = (userData.totalProfit || 0) + cyclePnl;
+
+      batch.update(userDoc.ref, {
+        [balanceField]: newBalance,
+        totalProfit: newTotalProfit,
+        lastTradeAt: now,
+        activePairChange24h: pair24hChange,
+        marketDataSource: "coingecko_live",
+      });
+
+      // Only record trade if PnL is meaningful
+      if (Math.abs(cyclePnl) > 0.0001) {
+        const tradeRef = db.collection("trades").doc();
+        batch.set(tradeRef, {
+          uid: userData.uid,
+          pair: activePair,
+          type: cyclePnl >= 0 ? "BUY" : "SELL",
+          amount: Math.abs(cyclePnl),
+          asset: tradingAsset,
+          price: prices.bitcoin?.usd ?? 65000,
+          pnl: cyclePnl,
+          strategy,
+          pair24hChange,
+          dataSource: "coingecko_live",
+          timestamp: now,
+          duration: 5, // 5-second cycle
+        });
+      }
+    }
+
+    await batch.commit();
+    console.log(`✅ Trade cycle complete. Data source: CoinGecko live.`);
+  } catch (error: any) {
+    console.error("Trading loop error:", error.message);
+    if (error.code === 7) {
+      console.error("CRITICAL: Firebase permission denied. Check Admin SDK credentials.");
+    }
+  }
+}
+
+if (db) {
+  setInterval(processBackgroundTrades, 5_000);
+}
+
+// ─── Express Server ───────────────────────────────────────────────────────────
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(cors());
+  // --- CORS: Restrict to known origins ---
+  const allowedOrigins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://quantum-auto-bot.vercel.app",
+    ...(process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ?? []),
+  ];
+
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error(`CORS: Origin '${origin}' not allowed`));
+        }
+      },
+      credentials: true,
+    })
+  );
+
   app.use(express.json());
 
-  // Global request logger for debugging 404s
-  app.use((req, res, next) => {
+  // Request logger
+  app.use((req, _res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
   });
 
-  // Wallet Withdrawal Endpoint
-  app.post("/api/wallet/withdraw", async (req, res) => {
-    if (!db) return res.status(500).json({ error: "Database not initialized" });
-    const { uid, amount, asset, walletAddress } = req.body;
-    if (!uid || !amount || !walletAddress) return res.status(400).json({ error: "Invalid request" });
+  // Rate limit tiers
+  const financialLimit = rateLimit(10, 60_000);  // 10 req/min — financial ops
+  const generalLimit   = rateLimit(60, 60_000);  // 60 req/min — general API
 
-    try {
-      const userRef = db.collection("users").doc(uid);
-      const userDoc = await userRef.get();
-      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FINANCIAL ENDPOINTS — Auth Required on ALL of these
+  // ═══════════════════════════════════════════════════════════════════════════
 
-      const userData = userDoc.data();
-      const currentWalletBalance = userData.walletBalance || 0;
+  // ── POST /api/wallet/withdraw ─────────────────────────────────────────────
+  app.post(
+    "/api/wallet/withdraw",
+    financialLimit,
+    verifyFirebaseToken,
+    requireSelfOrAdmin,
+    async (req: AuthRequest, res: Response) => {
+      if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-      if (amount > currentWalletBalance) {
-        return res.status(400).json({ error: "Insufficient trading wallet balance" });
+      const { uid, amount, asset, walletAddress } = req.body;
+      const amountNum = Number(amount);
+
+      if (!uid || !walletAddress || isNaN(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ error: "Invalid request: uid, amount (>0), and walletAddress are required" });
       }
 
-      // 1. Ensure system has real treasury keys before deducting DB balance
       if (!process.env.SUI_PRIVATE_KEY) {
-        return res.status(400).json({ error: "System treasury is not configured. Real on-chain withdrawals are currently disabled." });
+        return res.status(503).json({
+          error: "On-chain withdrawals are currently unavailable. Treasury not configured.",
+        });
       }
 
-      // 2. Update Firestore first (Optimistic or Lock)
-      const newWalletBalance = currentWalletBalance - amount;
-      await userRef.update({
-        walletBalance: newWalletBalance
-      });
+      const userRef = db.collection("users").doc(uid);
+      let newWalletBalance: number;
 
-      // 3. Perform On-Chain Transfer from Treasury to User
-      let txHash = "0x" + Math.random().toString(16).slice(2);
-      let onChainError = null;
-      let isSimulated = false;
-
+      // ── ATOMIC balance deduction (fixes TOCTOU race condition) ──
       try {
-        console.log(`Attempting REAL on-chain withdrawal for ${walletAddress} on Sui...`);
-          const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
-          const keypair = Ed25519Keypair.fromSecretKey(secretKey);
-          const txb = new Transaction();
-          const coinType = asset === "SUI" ? SUI_TYPE : (asset === "USDC" ? USDC_TYPE : USDT_TYPE);
-          const decimals = await getDecimals(coinType);
-          
-          // Platform Fee (0.1%)
-          const feePercent = 0.001;
-          const feeAmount = amount * feePercent;
-          const netAmount = amount - feeAmount;
-          
-          const rawNetAmount = Math.floor(netAmount * Math.pow(10, decimals));
-          const rawFeeAmount = Math.floor(feeAmount * Math.pow(10, decimals));
-
-          if (asset === "SUI") {
-            if (rawFeeAmount > 0) {
-              const [feeCoin] = txb.splitCoins(txb.gas, [rawFeeAmount]);
-              txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
-            }
-            const [mainCoin] = txb.splitCoins(txb.gas, [rawNetAmount]);
-            txb.transferObjects([mainCoin], walletAddress);
-          } else {
-            // Token Transfer (USDT/USDC)
-            const coins = await suiClient.getCoins({
-              owner: keypair.toSuiAddress(),
-              coinType: coinType,
-            });
-
-            if (coins.data.length === 0) throw new Error(`No ${asset} coins found in treasury`);
-
-            const coinObjectIds = coins.data.map((c) => c.coinObjectId);
-            const primaryCoin = coinObjectIds[0];
-            const rest = coinObjectIds.slice(1);
-            
-            if (rest.length > 0) {
-              txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
-            }
-
-            if (rawFeeAmount > 0) {
-              const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
-              txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
-            }
-
-            const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
-            txb.transferObjects([mainCoin], walletAddress);
+        newWalletBalance = await db.runTransaction(async (t) => {
+          const snap = await t.get(userRef);
+          if (!snap.exists) throw new Error("User not found");
+          const currentBalance = snap.data()!.walletBalance || 0;
+          if (amountNum > currentBalance) {
+            throw new Error(`Insufficient balance. Available: ${currentBalance.toFixed(2)}`);
           }
-          
-          txb.setGasBudget(10000000); // 0.01 SUI
-          
-          const result = await suiClient.signAndExecuteTransaction({
-            signer: keypair,
-            transaction: txb,
-          });
-          
-          txHash = result.digest;
-          await suiClient.waitForTransaction({ digest: txHash });
-          console.log(`Real Sui Withdrawal TX: ${txHash}`);
-        } catch (e: any) {
-          console.error("Real Sui withdrawal failed:", e);
-          onChainError = e.message || "Sui blockchain transaction failed";
-          
-          // Rollback Firestore if on-chain fails
-          await userRef.update({
-            walletBalance: currentWalletBalance // Rollback
-          });
-          return res.status(500).json({ error: "On-chain transfer failed. Balance rolled back." });
+          const updated = currentBalance - amountNum;
+          t.update(userRef, { walletBalance: updated });
+          return updated;
+        });
+      } catch (e: any) {
+        const isUserError = e.message.includes("Insufficient") || e.message.includes("not found");
+        return res.status(isUserError ? 400 : 500).json({ error: e.message });
+      }
+
+      // ── Attempt real on-chain transfer — rollback DB on failure ──
+      let txHash: string | null = null;
+      try {
+        const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY!);
+        const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+        const txb = new Transaction();
+        const coinType = asset === "SUI" ? SUI_TYPE : asset === "USDC" ? USDC_TYPE : USDT_TYPE;
+        const decimals = await getDecimals(coinType);
+        const feePercent = 0.001;
+        const netAmount = amountNum * (1 - feePercent);
+        const feeAmount = amountNum * feePercent;
+        const rawNet = Math.floor(netAmount * Math.pow(10, decimals));
+        const rawFee = Math.floor(feeAmount * Math.pow(10, decimals));
+
+        if (asset === "SUI") {
+          if (rawFee > 0) {
+            const [feeCoin] = txb.splitCoins(txb.gas, [rawFee]);
+            txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+          }
+          const [mainCoin] = txb.splitCoins(txb.gas, [rawNet]);
+          txb.transferObjects([mainCoin], walletAddress);
+        } else {
+          const coins = await suiClient.getCoins({ owner: keypair.toSuiAddress(), coinType });
+          if (coins.data.length === 0) throw new Error(`No ${asset} in treasury`);
+          const ids = coins.data.map((c) => c.coinObjectId);
+          if (ids.length > 1) txb.mergeCoins(txb.object(ids[0]), ids.slice(1).map((id) => txb.object(id)));
+          if (rawFee > 0) {
+            const [feeCoin] = txb.splitCoins(txb.object(ids[0]), [rawFee]);
+            txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+          }
+          const [mainCoin] = txb.splitCoins(txb.object(ids[0]), [rawNet]);
+          txb.transferObjects([mainCoin], walletAddress);
         }
 
-      // Create notification
+        txb.setGasBudget(10_000_000);
+        const result = await suiClient.signAndExecuteTransaction({ signer: keypair, transaction: txb });
+        await suiClient.waitForTransaction({ digest: result.digest });
+        txHash = result.digest;
+        console.log(`✅ On-chain withdrawal TX: ${txHash}`);
+      } catch (e: any) {
+        // Rollback the DB deduction since on-chain failed
+        console.error("On-chain withdrawal failed — rolling back DB:", e.message);
+        await userRef.update({ walletBalance: newWalletBalance + amountNum });
+        return res.status(500).json({
+          error: "On-chain transfer failed. No funds were deducted. Please try again.",
+          details: e.message,
+        });
+      }
+
       await db.collection("notifications").add({
         uid,
         type: "WITHDRAWAL",
         title: "Withdrawal Successful",
-        message: `Successfully withdrawn ${amount.toFixed(2)} ${asset || 'USD'} to your on-chain wallet.`,
-        amount,
-        asset: asset || 'USD',
+        message: `Withdrawn ${amountNum.toFixed(2)} ${asset || "USD"} to your on-chain wallet.`,
+        amount: amountNum,
+        asset: asset || "USD",
         txHash,
         timestamp: new Date().toISOString(),
-        read: false
+        read: false,
       });
 
-      res.json({
-        success: true,
-        newWalletBalance,
-        txHash,
-        isSimulated,
-        message: isSimulated 
-          ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
-          : "Withdrawal successful."
-      });
-    } catch (error: any) {
-      console.error("Withdrawal error:", error);
-      res.status(500).json({ error: error.message });
+      return res.json({ success: true, newWalletBalance, txHash, message: "Withdrawal successful." });
     }
-  });
+  );
 
-  // Trading Engine Simulation & Settlement
-  app.post("/api/trading/settle", async (req, res) => {
-    const { uid, walletAddress } = req.body;
-    if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
+  // ── POST /api/trading/settle ──────────────────────────────────────────────
+  app.post(
+    "/api/trading/settle",
+    financialLimit,
+    verifyFirebaseToken,
+    requireSelfOrAdmin,
+    async (req: AuthRequest, res: Response) => {
+      if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    try {
+      const { uid, walletAddress } = req.body;
+      if (!uid) return res.status(400).json({ error: "Missing uid" });
+
       const userRef = db.collection("users").doc(uid);
-      const userDoc = await userRef.get();
-      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
 
-      const userData = userDoc.data();
-      const tradingAsset = userData.tradingAsset || "USDT";
-      const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
-      
-      const currentAssetBalance = userData[balanceField] || 0;
-      const initialInvestment = userData.initialInvestment || 0;
-      const profit = currentAssetBalance - initialInvestment;
-
-      // Calculate shares (50/50 split on profit)
-      const userProfitShare = profit > 0 ? profit * 0.5 : profit;
-      const treasuryShare = profit > 0 ? profit * 0.5 : 0;
-      const totalToUser = initialInvestment + userProfitShare;
-
-      console.log(`Settling for ${uid}: Asset=${tradingAsset}, Current=${currentAssetBalance}, Initial=${initialInvestment}, Profit=${profit}, ToUser=${totalToUser}, ToTreasury=${treasuryShare}`);
-      console.log(`Using Treasury: ${SUI_TREASURY_ADDRESS}, Contract: ${SUI_CONTRACT_ADDRESS}`);
-
-      // Update Firestore
-      const walletBalance = userData.walletBalance || 0;
-      const newWalletBalance = walletBalance + totalToUser;
-
-      await userRef.update({
-        isTrading: false,
-        [balanceField]: 0,
-        initialInvestment: 0,
-        walletBalance: newWalletBalance,
-        lastSettlement: {
-          amount: totalToUser,
-          profit: userProfitShare,
-          treasury: treasuryShare,
-          asset: tradingAsset,
-          treasuryAddress: SUI_TREASURY_ADDRESS,
-          timestamp: new Date().toISOString()
-        }
-      });
-
-      // Create notification
-      await db.collection("notifications").add({
-        uid,
-        type: "TRADE_STOPPED",
-        title: "Trading Stopped",
-        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet.`,
-        amount: totalToUser,
-        asset: tradingAsset,
-        timestamp: new Date().toISOString(),
-        read: false
-      });
-
-      // Post settlement to community
-      if (profit > 0) {
-        await db.collection("posts").add({
-          authorUid: "system-bot",
-          authorName: "Quantum Bot",
-          authorAvatar: "https://api.dicebear.com/7.x/bottts/svg?seed=quantum_bot",
-          authorWallet: "0x0000000000000000000000000000000000000000",
-          content: `🎉 Settlement Update: ${userData.displayName || 'A trader'} just settled a trading session with ${profit.toFixed(2)} ${tradingAsset} profit! Shared 50/50 with Treasury.`,
-          likesCount: 0,
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      // Real On-Chain Settlement (Sui Implementation)
-      let txHash = "0x" + Math.random().toString(16).slice(2);
-      let onChainError = null;
-
-      if (process.env.SUI_PRIVATE_KEY) {
-        try {
-          const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
-          const keypair = Ed25519Keypair.fromSecretKey(secretKey);
-          const adminAddress = keypair.toSuiAddress();
-          
-          console.log(`Attempting REAL on-chain settlement for ${walletAddress || uid} on Sui...`);
-          
-          const txb = new Transaction();
-          const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
-          const decimals = await getDecimals(coinType);
-          
-          // If it's a contract-based SUI session, use the contract
-          if (tradingAsset === "SUI" && userData.tradingSessionId) {
-            console.log(`Using Move contract for SUI settlement. Session: ${userData.tradingSessionId}`);
-            
-            const adminCapId = await findAdminCap(adminAddress);
-            if (!adminCapId) throw new Error("AdminCap not found for the provided private key");
-
-            const rawFinalAmount = Math.floor(totalToUser * 1e9);
-            
-            txb.moveCall({
-              target: `${SUI_CONTRACT_ADDRESS}::trading::settle_session`,
-              arguments: [
-                txb.object(adminCapId),
-                txb.object(userData.tradingSessionId),
-                txb.pure.u64(rawFinalAmount),
-                txb.pure.u64(Date.now()),
-              ],
-            });
-          }
-
-          // Platform Fee (0.1%)
-          const feePercent = 0.001;
-          const feeAmount = totalToUser * feePercent;
-          const netAmount = totalToUser - feeAmount;
-          
-          const rawNetAmount = Math.floor(netAmount * Math.pow(10, decimals));
-          const rawFeeAmount = Math.floor(feeAmount * Math.pow(10, decimals));
-          
-          // Transfer the assets from Treasury back to User
-          const coins = await suiClient.getCoins({
-            owner: adminAddress,
-            coinType: coinType,
-          });
-
-          if (coins.data.length > 0) {
-            const coinObjectIds = coins.data.map((c) => c.coinObjectId);
-            const primaryCoin = coinObjectIds[0];
-            const rest = coinObjectIds.slice(1);
-            
-            if (rest.length > 0) {
-              txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
-            }
-
-            if (rawFeeAmount > 0) {
-              const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
-              txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
-            }
-
-            const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
-            txb.transferObjects([mainCoin], walletAddress || userData.walletAddress);
-            
-            txb.setGasBudget(20000000); // 0.02 SUI
-            
-            const result = await suiClient.signAndExecuteTransaction({
-              signer: keypair,
-              transaction: txb,
-            });
-            
-            txHash = result.digest;
-            await suiClient.waitForTransaction({ digest: txHash });
-            console.log(`Real Sui Settlement TX: ${txHash}`);
-          } else {
-            console.warn(`No ${tradingAsset} coins found in treasury for settlement`);
-            onChainError = `No ${tradingAsset} coins found in treasury`;
-          }
-        } catch (e: any) {
-          console.error("Real Sui settlement failed:", e);
-          onChainError = e.message || "Sui blockchain transaction failed";
-        }
-      }
-      
-      res.json({
-        success: true,
-        totalToUser,
-        userProfitShare,
-        treasuryShare,
-        txHash,
-        onChainError,
-        message: onChainError ? `Settlement recorded, but on-chain transfer failed: ${onChainError}` : "Settlement successful. Funds returned to wallet."
-      });
-    } catch (error: any) {
-      console.error("Settlement error:", error);
-      res.status(500).json({ success: false, error: error.message || "Internal server error" });
-    }
-  });
-
-  // Withdraw profit without stopping trade
-  app.post("/api/trading/withdraw-profit", async (req, res) => {
-    const { uid, walletAddress } = req.body;
-    if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
-
-    try {
-      const userRef = db.collection("users").doc(uid);
-      const userDoc = await userRef.get();
-      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-
-      const userData = userDoc.data();
-      if (!userData.isTrading) return res.status(400).json({ error: "No active trading session" });
-
-      const tradingAsset = userData.tradingAsset || "USDT";
-      const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
-      
-      const currentAssetBalance = userData[balanceField] || 0;
-      const initialInvestment = userData.initialInvestment || 0;
-      const profit = currentAssetBalance - initialInvestment;
-
-      if (profit <= 0) return res.status(400).json({ error: "No profit to withdraw" });
-
-      // Calculate shares (50/50 split on profit)
-      const userProfitShare = profit * 0.5;
-      const treasuryShare = profit * 0.5;
-
-      // Update Firestore
-      const walletBalance = userData.walletBalance || 0;
-      const newWalletBalance = walletBalance + userProfitShare;
-
-      await userRef.update({
-        [balanceField]: initialInvestment, // Reset trading balance to initial
-        walletBalance: newWalletBalance,
-        totalProfit: (userData.totalProfit || 0) - userProfitShare // Adjust total profit since we're withdrawing it
-      });
-
-      // Create notification
-      await db.collection("notifications").add({
-        uid,
-        type: "PROFIT_WITHDRAWAL",
-        title: "Profit Withdrawn",
-        message: `Withdrawn ${userProfitShare.toFixed(2)} ${tradingAsset} profit to your wallet balance.`,
-        amount: userProfitShare,
-        asset: tradingAsset,
-        timestamp: new Date().toISOString(),
-        read: false
-      });
-
-      // Real On-Chain Transfer (Simulated for demo, but structured for real Sui)
-      let txHash = "0x" + Math.random().toString(16).slice(2);
-      let onChainError = null;
-
-      if (process.env.SUI_PRIVATE_KEY) {
-        try {
-          const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
-          const keypair = Ed25519Keypair.fromSecretKey(secretKey);
-          const txb = new Transaction();
-          const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
-          const decimals = await getDecimals(coinType);
-          
-          const rawNetAmount = Math.floor(userProfitShare * Math.pow(10, decimals));
-          const rawFeeAmount = Math.floor(treasuryShare * Math.pow(10, decimals));
-
-          const coins = await suiClient.getCoins({
-            owner: keypair.toSuiAddress(),
-            coinType: coinType,
-          });
-
-          if (coins.data.length > 0) {
-            const coinObjectIds = coins.data.map((c) => c.coinObjectId);
-            const primaryCoin = coinObjectIds[0];
-            const rest = coinObjectIds.slice(1);
-            if (rest.length > 0) txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
-
-            if (rawFeeAmount > 0) {
-              const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
-              txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
-            }
-
-            const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
-            txb.transferObjects([mainCoin], walletAddress || userData.walletAddress);
-            
-            txb.setGasBudget(10000000);
-            const result = await suiClient.signAndExecuteTransaction({ signer: keypair, transaction: txb });
-            txHash = result.digest;
-          }
-        } catch (e: any) {
-          console.error("Real Sui profit withdrawal failed:", e);
-          onChainError = e.message;
-        }
-      }
-
-      res.json({ success: true, withdrawn: userProfitShare, txHash, onChainError });
-    } catch (error: any) {
-      console.error("Profit withdrawal error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Community Comments
-  app.post("/api/community/comment", async (req, res) => {
-    console.log("POST /api/community/comment", req.body);
-    if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
-    try {
-      const { postId, uid, authorName, authorAvatar, content } = req.body;
-      if (!postId || !uid || !content) {
-        return res.status(400).json({ success: false, error: "Missing required fields" });
-      }
-
-      // Check if post exists
-      const postRef = db.collection("posts").doc(postId);
-      const postDoc = await postRef.get();
-      if (!postDoc.exists) {
-        console.error(`Post not found: ${postId}`);
-        return res.status(404).json({ success: false, error: "Post not found" });
-      }
-
-      const comment = {
-        uid,
-        authorName,
-        authorAvatar,
-        content,
-        createdAt: new Date().toISOString()
-      };
-
-      await postRef.collection("comments").add(comment);
-      await postRef.update({
-        commentsCount: admin.firestore.FieldValue.increment(1)
-      });
-
-      console.log(`Comment added to post ${postId} by user ${uid}`);
-      res.json({ success: true, comment });
-    } catch (error: any) {
-      console.error("Comment error:", error);
-      res.status(500).json({ success: false, error: error.message || "Internal server error" });
-    }
-  });
-
-  app.post("/api/community/like", async (req, res) => {
-    console.log("POST /api/community/like", req.body);
-    if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
-    try {
-      const { postId, uid } = req.body;
-      if (!postId || !uid) {
-        return res.status(400).json({ success: false, error: "Missing required fields" });
-      }
-
-      const postRef = db.collection("posts").doc(postId);
-      const postDoc = await postRef.get();
-      if (!postDoc.exists) {
-        console.error(`Post not found: ${postId}`);
-        return res.status(404).json({ success: false, error: "Post not found" });
-      }
-
-      const likeRef = postRef.collection("likes").doc(uid);
-      const likeDoc = await likeRef.get();
-
-      if (likeDoc.exists) {
-        // Unlike
-        await likeRef.delete();
-        await postRef.update({
-          likesCount: admin.firestore.FieldValue.increment(-1)
-        });
-        console.log(`User ${uid} unliked post ${postId}`);
-        return res.json({ success: true, liked: false });
-      } else {
-        // Like
-        await likeRef.set({ uid, createdAt: new Date().toISOString() });
-        await postRef.update({
-          likesCount: admin.firestore.FieldValue.increment(1)
-        });
-        console.log(`User ${uid} liked post ${postId}`);
-        return res.json({ success: true, liked: true });
-      }
-    } catch (error: any) {
-      console.error("Like error:", error);
-      res.status(500).json({ success: false, error: error.message || "Internal server error" });
-    }
-  });
-
-  app.post("/api/trading/simulate", async (req, res) => {
-    const { strategy, principal, duration, account } = req.body;
-    
-    if (isNaN(principal) || principal <= 0) {
-        return res.status(400).json({ error: "Invalid principal amount" });
-    }
-
-    // Simple simulation logic based on strategy
-    let multiplier = 1.0;
-    let risk = 0.05;
-
-    switch (strategy) {
-      case "Aggressive":
-        multiplier = 1.1 + (Math.random() * 0.2 - 0.1); // -10% to +30%
-        risk = 0.15;
-        break;
-      case "Momentum":
-        multiplier = 1.05 + (Math.random() * 0.1 - 0.02); // -2% to +13%
-        risk = 0.08;
-        break;
-      case "Scalping":
-        multiplier = 1.02 + (Math.random() * 0.05 - 0.01); // -1% to +6%
-        risk = 0.03;
-        break;
-      case "Conservative":
-        multiplier = 1.01 + (Math.random() * 0.02 - 0.005); // -0.5% to +2.5%
-        risk = 0.01;
-        break;
-      default:
-        multiplier = 1.0;
-    }
-
-    if (Math.random() < risk) {
-        multiplier *= (0.8 + Math.random() * 0.15);
-    }
-
-    const finalBalanceVal = principal * multiplier;
-    const profit = finalBalanceVal - principal;
-    
-    // 50/50 profit split: user gets principal + 50% of profit (if profit > 0)
-    // If profit is negative, user takes the full loss
-    const userShareOfProfit = profit > 0 ? profit * 0.5 : profit;
-    const userFinalBalance = principal + userShareOfProfit;
-    
-    // Ensure we have a valid number and it's not negative
-    let finalBalanceFormatted = 0;
-    if (!isNaN(userFinalBalance) && isFinite(userFinalBalance)) {
-      finalBalanceFormatted = Math.max(0, userFinalBalance);
-    }
-
-    console.log(`Simulation: Strategy=${strategy}, Principal=${principal}, Multiplier=${multiplier}, Profit=${profit}, UserShare=${userShareOfProfit}, Final=${finalBalanceFormatted}`);
-
-    let txHash = null;
-    let error = null;
-
-    // Real On-Chain Settlement if Private Key is present (Sui Implementation)
-    if (account && process.env.SUI_PRIVATE_KEY) {
       try {
-        console.log(`Attempting on-chain settlement for ${account} on Sui with balance ${finalBalanceFormatted}`);
-        // In a real Sui implementation, we would use Sui SDK to execute a Move call
-        // For now, we simulate the success of the on-chain action
-        txHash = "0x" + Math.random().toString(16).slice(2);
-        console.log(`Sui Settlement TX simulated: ${txHash}`);
-      } catch (e: any) {
-        console.error("Sui settlement failed:", e);
-        error = e.message || "Unknown Sui blockchain error";
+        const snap = await userRef.get();
+        if (!snap.exists) return res.status(404).json({ error: "User not found" });
+
+        const userData = snap.data()!;
+        const tradingAsset = userData.tradingAsset || "USDT";
+        const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+        const currentBalance = userData[balanceField] || 0;
+        const initialInvestment = userData.initialInvestment || 0;
+        const profit = currentBalance - initialInvestment;
+        const userProfitShare = profit > 0 ? profit * 0.5 : profit;
+        const treasuryShare = profit > 0 ? profit * 0.5 : 0;
+        const totalToUser = initialInvestment + userProfitShare;
+        const newWalletBalance = (userData.walletBalance || 0) + totalToUser;
+
+        await userRef.update({
+          isTrading: false,
+          [balanceField]: 0,
+          initialInvestment: 0,
+          walletBalance: newWalletBalance,
+          lastSettlement: {
+            amount: totalToUser,
+            profit: userProfitShare,
+            treasury: treasuryShare,
+            asset: tradingAsset,
+            timestamp: new Date().toISOString(),
+          },
+        });
+
+        await db.collection("notifications").add({
+          uid,
+          type: "TRADE_STOPPED",
+          title: "Trading Stopped",
+          message: `Session ended. ${totalToUser.toFixed(2)} ${tradingAsset} returned to your wallet.`,
+          amount: totalToUser,
+          asset: tradingAsset,
+          timestamp: new Date().toISOString(),
+          read: false,
+        });
+
+        // Real on-chain settlement — best effort, no rollback (DB already settled)
+        let txHash: string | null = null;
+        let onChainError: string | null = null;
+
+        if (process.env.SUI_PRIVATE_KEY && walletAddress && totalToUser > 0) {
+          try {
+            const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY!);
+            const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+            const adminAddress = keypair.toSuiAddress();
+            const txb = new Transaction();
+            const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+            const decimals = await getDecimals(coinType);
+            const rawNet = Math.floor(totalToUser * (1 - 0.001) * Math.pow(10, decimals));
+            const coins = await suiClient.getCoins({ owner: adminAddress, coinType });
+
+            if (coins.data.length > 0) {
+              const ids = coins.data.map((c) => c.coinObjectId);
+              if (ids.length > 1) txb.mergeCoins(txb.object(ids[0]), ids.slice(1).map((id) => txb.object(id)));
+              const [mainCoin] = txb.splitCoins(txb.object(ids[0]), [rawNet]);
+              txb.transferObjects([mainCoin], walletAddress);
+              txb.setGasBudget(20_000_000);
+              const result = await suiClient.signAndExecuteTransaction({ signer: keypair, transaction: txb });
+              await suiClient.waitForTransaction({ digest: result.digest });
+              txHash = result.digest;
+              console.log(`✅ On-chain settlement TX: ${txHash}`);
+            } else {
+              onChainError = `No ${tradingAsset} in treasury for settlement`;
+              console.warn(onChainError);
+            }
+          } catch (e: any) {
+            onChainError = e.message;
+            console.error("On-chain settlement failed (DB settled, on-chain pending):", e.message);
+          }
+        }
+
+        return res.json({
+          success: true,
+          totalToUser,
+          userProfitShare,
+          treasuryShare,
+          txHash,
+          onChainError,
+          message: onChainError
+            ? `DB settlement complete. On-chain transfer pending: ${onChainError}`
+            : "Settlement complete.",
+        });
+      } catch (error: any) {
+        console.error("Settlement error:", error);
+        return res.status(500).json({ success: false, error: error.message });
       }
-    } else if (!process.env.SUI_PRIVATE_KEY) {
-      console.log("Skipping on-chain settlement: SUI_PRIVATE_KEY not set");
+    }
+  );
+
+  // ── POST /api/trading/withdraw-profit ─────────────────────────────────────
+  app.post(
+    "/api/trading/withdraw-profit",
+    financialLimit,
+    verifyFirebaseToken,
+    requireSelfOrAdmin,
+    async (req: AuthRequest, res: Response) => {
+      if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+      const { uid, walletAddress } = req.body;
+      if (!uid) return res.status(400).json({ error: "Missing uid" });
+
+      try {
+        const userRef = db.collection("users").doc(uid);
+        const snap = await userRef.get();
+        if (!snap.exists) return res.status(404).json({ error: "User not found" });
+
+        const userData = snap.data()!;
+        if (!userData.isTrading) return res.status(400).json({ error: "No active trading session" });
+
+        const tradingAsset = userData.tradingAsset || "USDT";
+        const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+        const profit = (userData[balanceField] || 0) - (userData.initialInvestment || 0);
+        if (profit <= 0) return res.status(400).json({ error: "No profit available to withdraw" });
+
+        const userProfitShare = profit * 0.5;
+        const newWalletBalance = (userData.walletBalance || 0) + userProfitShare;
+
+        await userRef.update({
+          [balanceField]: userData.initialInvestment || 0,
+          walletBalance: newWalletBalance,
+          totalProfit: (userData.totalProfit || 0) - userProfitShare,
+        });
+
+        await db.collection("notifications").add({
+          uid,
+          type: "PROFIT_WITHDRAWAL",
+          title: "Profit Withdrawn",
+          message: `${userProfitShare.toFixed(2)} ${tradingAsset} profit moved to your wallet balance.`,
+          amount: userProfitShare,
+          asset: tradingAsset,
+          timestamp: new Date().toISOString(),
+          read: false,
+        });
+
+        let txHash: string | null = null;
+        let onChainError: string | null = null;
+
+        if (process.env.SUI_PRIVATE_KEY && walletAddress) {
+          try {
+            const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY!);
+            const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+            const txb = new Transaction();
+            const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+            const decimals = await getDecimals(coinType);
+            const rawAmount = Math.floor(userProfitShare * Math.pow(10, decimals));
+            const coins = await suiClient.getCoins({ owner: keypair.toSuiAddress(), coinType });
+
+            if (coins.data.length > 0) {
+              const ids = coins.data.map((c) => c.coinObjectId);
+              if (ids.length > 1) txb.mergeCoins(txb.object(ids[0]), ids.slice(1).map((id) => txb.object(id)));
+              const [mainCoin] = txb.splitCoins(txb.object(ids[0]), [rawAmount]);
+              txb.transferObjects([mainCoin], walletAddress);
+              txb.setGasBudget(10_000_000);
+              const result = await suiClient.signAndExecuteTransaction({ signer: keypair, transaction: txb });
+              txHash = result.digest;
+            }
+          } catch (e: any) {
+            onChainError = e.message;
+            console.error("On-chain profit withdrawal failed:", e.message);
+          }
+        }
+
+        return res.json({ success: true, withdrawn: userProfitShare, txHash, onChainError });
+      } catch (error: any) {
+        console.error("Profit withdrawal error:", error);
+        return res.status(500).json({ error: error.message });
+      }
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // COMMUNITY ENDPOINTS — Auth Required
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── POST /api/community/comment ───────────────────────────────────────────
+  app.post(
+    "/api/community/comment",
+    generalLimit,
+    verifyFirebaseToken,
+    async (req: AuthRequest, res: Response) => {
+      if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
+
+      const { postId, uid, authorName, authorAvatar, content } = req.body;
+
+      if (req.uid !== uid) {
+        return res.status(403).json({ success: false, error: "Forbidden: uid mismatch" });
+      }
+      if (!postId || !uid || !content?.trim()) {
+        return res.status(400).json({ success: false, error: "Missing required fields" });
+      }
+      if (content.length > 1000) {
+        return res.status(400).json({ success: false, error: "Comment exceeds 1000 characters" });
+      }
+
+      try {
+        const postRef = db.collection("posts").doc(postId);
+        const postSnap = await postRef.get();
+        if (!postSnap.exists) return res.status(404).json({ success: false, error: "Post not found" });
+
+        const comment = {
+          uid,
+          authorName,
+          authorAvatar,
+          content: content.trim(),
+          createdAt: new Date().toISOString(),
+        };
+        await postRef.collection("comments").add(comment);
+        await postRef.update({ commentsCount: admin.firestore.FieldValue.increment(1) });
+        return res.json({ success: true, comment });
+      } catch (error: any) {
+        console.error("Comment error:", error);
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // ── POST /api/community/like ──────────────────────────────────────────────
+  app.post(
+    "/api/community/like",
+    generalLimit,
+    verifyFirebaseToken,
+    async (req: AuthRequest, res: Response) => {
+      if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
+
+      const { postId, uid } = req.body;
+      if (req.uid !== uid) {
+        return res.status(403).json({ success: false, error: "Forbidden: uid mismatch" });
+      }
+      if (!postId || !uid) {
+        return res.status(400).json({ success: false, error: "Missing postId or uid" });
+      }
+
+      try {
+        const postRef = db.collection("posts").doc(postId);
+        const postSnap = await postRef.get();
+        if (!postSnap.exists) return res.status(404).json({ success: false, error: "Post not found" });
+
+        const likeRef = postRef.collection("likes").doc(uid);
+        const likeSnap = await likeRef.get();
+
+        if (likeSnap.exists) {
+          await likeRef.delete();
+          await postRef.update({ likesCount: admin.firestore.FieldValue.increment(-1) });
+          return res.json({ success: true, liked: false });
+        } else {
+          await likeRef.set({ uid, createdAt: new Date().toISOString() });
+          await postRef.update({ likesCount: admin.firestore.FieldValue.increment(1) });
+          return res.json({ success: true, liked: true });
+        }
+      } catch (error: any) {
+        console.error("Like error:", error);
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TRADE INTENT ENDPOINTS — Auth Required
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── POST /api/trade/execute-intent ────────────────────────────────────────
+  app.post(
+    "/api/trade/execute-intent",
+    generalLimit,
+    verifyFirebaseToken,
+    requireSelfOrAdmin,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const { uid, action, asset, amount, strategyId } = req.body;
+        if (!uid || !action || !asset || !amount) {
+          return res.status(400).json({ error: "Missing required fields" });
+        }
+
+        let riskLevel = 0.05;
+        if (strategyId === "Aggressive") riskLevel = 0.15;
+        else if (strategyId === "Scalping") riskLevel = 0.08;
+
+        const instruction = {
+          intentId: `intent_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          action,
+          asset,
+          amount: Number(amount),
+          riskLevel,
+          strategyId: strategyId || "Momentum",
+          // TODO: Replace with HMAC-SHA256 signed by server secret for full integrity
+          signature: `srv_${uid.slice(0, 8)}_${Date.now()}`,
+          timestamp: Date.now(),
+        };
+
+        if (db) {
+          await db.collection("trade_intents").doc(instruction.intentId).set({
+            ...instruction,
+            uid,
+            status: "PENDING",
+          });
+        }
+
+        return res.json({ success: true, instruction });
+      } catch (error: any) {
+        console.error("Execute intent error:", error);
+        return res.status(500).json({ error: error.message });
+      }
+    }
+  );
+
+  // ── GET /api/trade/status/:intentId ──────────────────────────────────────
+  app.get(
+    "/api/trade/status/:intentId",
+    verifyFirebaseToken,
+    async (req: AuthRequest, res: Response) => {
+      if (!db) return res.status(500).json({ error: "DB not initialized" });
+      try {
+        const snap = await db.collection("trade_intents").doc(req.params.intentId).get();
+        if (!snap.exists) return res.status(404).json({ error: "Intent not found" });
+        if (snap.data()?.uid !== req.uid && !req.isAdmin) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+        return res.json({ success: true, status: snap.data()?.status });
+      } catch (error: any) {
+        return res.status(500).json({ error: error.message });
+      }
+    }
+  );
+
+  // ── POST /api/trade/sync-result ───────────────────────────────────────────
+  app.post(
+    "/api/trade/sync-result",
+    generalLimit,
+    verifyFirebaseToken,
+    requireSelfOrAdmin,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const { uid, intentId, digest, success } = req.body;
+        if (!uid || !intentId || !digest) {
+          return res.status(400).json({ error: "Missing required fields" });
+        }
+
+        if (db) {
+          await db.collection("trade_intents").doc(intentId).update({
+            status: success ? "COMPLETED" : "FAILED",
+            digest,
+            completedAt: Date.now(),
+          });
+
+          if (success) {
+            const [intentSnap, userSnap] = await Promise.all([
+              db.collection("trade_intents").doc(intentId).get(),
+              db.collection("users").doc(uid).get(),
+            ]);
+
+            if (intentSnap.exists && userSnap.exists) {
+              const intent = intentSnap.data()!;
+              const user = userSnap.data()!;
+              const actionText =
+                intent.action === "START_SESSION" ? "started a trading session" : intent.action.toLowerCase();
+
+              await db.collection("posts").add({
+                authorUid: uid,
+                authorName: user.displayName || "Anonymous Trader",
+                authorAvatar: user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`,
+                content: `Just ${actionText} with ${intent.amount} ${intent.asset} using ${intent.strategyId} strategy! 🚀 (Verified: ${digest.substring(0, 12)}...)`,
+                likesCount: 0,
+                commentsCount: 0,
+                createdAt: new Date().toISOString(),
+              });
+
+              await db.collection("notifications").add({
+                uid,
+                type: "TRADE_EXECUTED",
+                title: "Trade Executed",
+                message: `Your ${intent.strategyId} trade for ${intent.amount} ${intent.asset} was verified on-chain.`,
+                timestamp: new Date().toISOString(),
+                read: false,
+              });
+            }
+          }
+        }
+
+        return res.json({ success: true });
+      } catch (error: any) {
+        console.error("Sync result error:", error);
+        return res.status(500).json({ error: error.message });
+      }
+    }
+  );
+
+  // ── POST /api/trading/simulate ────────────────────────────────────────────
+  app.post("/api/trading/simulate", generalLimit, async (req: Request, res: Response) => {
+    const { strategy, principal } = req.body;
+    const principalNum = Number(principal);
+    if (isNaN(principalNum) || principalNum <= 0) {
+      return res.status(400).json({ error: "Invalid principal amount" });
     }
 
-    res.json({
-      finalBalance: finalBalanceFormatted,
-      profit: userShareOfProfit, // Return the user's share of profit
-      totalProfit: profit, // Return the total profit generated
-      txHash,
-      error,
-      timestamp: new Date().toISOString()
+    const prices = await fetchLivePrices();
+    if (!prices?.bitcoin) {
+      return res.status(503).json({ error: "Market data unavailable. Cannot simulate." });
+    }
+
+    const btcChange24h = prices.bitcoin.usd_24h_change;
+    const yieldRate = computeStrategyYield(strategy, btcChange24h);
+    const simulatedProfit = principalNum * yieldRate * 17_280;
+    const userShare = simulatedProfit > 0 ? simulatedProfit * 0.5 : simulatedProfit;
+    const finalBalance = Math.max(0, principalNum + userShare);
+
+    return res.json({
+      finalBalance,
+      profit: userShare,
+      totalProfit: simulatedProfit,
+      btcChange24h,
+      dataSource: "coingecko_live",
+      txHash: null,
+      timestamp: new Date().toISOString(),
     });
   });
 
-  // Leaderboard Endpoint
-  app.get("/api/leaderboard", async (req, res) => {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PUBLIC ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── GET /api/leaderboard ──────────────────────────────────────────────────
+  app.get("/api/leaderboard", generalLimit, async (_req: Request, res: Response) => {
     if (!db) return res.status(500).json({ error: "Database not initialized" });
     try {
-      const topTraders = await db.collection("users")
-        .orderBy("totalProfit", "desc")
-        .limit(10)
-        .get();
-      
-      const traders = topTraders.docs.map((doc: any) => ({
+      const snap = await db.collection("users").orderBy("totalProfit", "desc").limit(10).get();
+      const traders = snap.docs.map((doc) => ({
         id: doc.id,
         name: doc.data().displayName || "Anonymous",
-        avatar: doc.data().photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${doc.id}`,
+        // Only expose public-safe fields — no balances, no keys
+        avatar: doc.data().avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${doc.id}`,
         profit: doc.data().totalProfit || 0,
-        isTrading: doc.data().isTrading || false
+        isTrading: doc.data().isTrading || false,
       }));
-      
-      res.json(traders);
+      return res.json(traders);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ error: error.message });
     }
   });
 
-  // Firebase Admin Status Endpoint
-  app.get("/api/admin/status", async (req, res) => {
-    if (!db) {
-      return res.json({ status: "error", message: "Firebase Admin not initialized" });
-    }
-    try {
-      const config = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-      const dbId = config.firestoreDatabaseId || "(default)";
-      const testDoc = await db.collection("health_check").doc("ping").get();
-      res.json({ 
-        status: "ok", 
-        projectId: config.projectId,
-        databaseId: dbId,
-        lastPing: testDoc.exists ? testDoc.data()?.lastPing : "none"
-      });
-    } catch (e: any) {
-      res.status(500).json({ status: "error", message: e.message });
-    }
-  });
-
-  // Crypto Prices Endpoint
-  app.get("/api/prices", async (req, res) => {
+  // ── GET /api/prices ───────────────────────────────────────────────────────
+  app.get("/api/prices", generalLimit, async (_req: Request, res: Response) => {
     try {
       const apiKey = process.env.COINGECKO_API_KEY;
-      const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false`;
-      
-      console.log(`Fetching prices from CoinGecko. API Key present: ${!!apiKey}`);
-      
-      const headers: Record<string, string> = {
-        'Accept': 'application/json',
-      };
-      
-      if (apiKey) {
-        // Try both header and query param for maximum compatibility
-        headers['x-cg-demo-api-key'] = apiKey;
-      }
-      
-      const response = await fetch(url, { headers });
-      
-      if (!response.ok) {
-        const text = await response.text();
-        console.warn(`CoinGecko API returned status ${response.status}: ${text}`);
-        
-        // If unauthorized or rate limited, return a fallback to keep the UI working
-        if (response.status === 401 || response.status === 429 || response.status === 403) {
-          console.log("Returning fallback price data due to API error");
-          return res.json(getFallbackPrices());
-        }
-        throw new Error(`API returned ${response.status}`);
-      }
-      
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      console.error("Failed to fetch prices:", error);
-      // Always return fallback data instead of 500 to keep the app functional
-      res.json(getFallbackPrices());
+      const headers: Record<string, string> = { Accept: "application/json" };
+      if (apiKey) headers["x-cg-demo-api-key"] = apiKey;
+      const response = await fetch(
+        "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false",
+        { headers }
+      );
+      if (!response.ok) return res.json(getFallbackPrices());
+      return res.json(await response.json());
+    } catch {
+      return res.json(getFallbackPrices());
     }
   });
 
-  // Fallback price data for when API is unavailable
   function getFallbackPrices() {
     return [
-      { id: "bitcoin", symbol: "btc", name: "Bitcoin", current_price: 65432.10, price_change_percentage_24h: 2.5, image: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
+      { id: "bitcoin", symbol: "btc", name: "Bitcoin", current_price: 65432.1, price_change_percentage_24h: 2.5, image: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
       { id: "ethereum", symbol: "eth", name: "Ethereum", current_price: 3456.78, price_change_percentage_24h: -1.2, image: "https://assets.coingecko.com/coins/images/279/large/ethereum.png" },
       { id: "binancecoin", symbol: "bnb", name: "BNB", current_price: 580.45, price_change_percentage_24h: 0.8, image: "https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png" },
-      { id: "solana", symbol: "sol", name: "Solana", current_price: 145.20, price_change_percentage_24h: 5.4, image: "https://assets.coingecko.com/coins/images/4128/large/solana.png" },
-      { id: "ripple", symbol: "xrp", name: "XRP", current_price: 0.62, price_change_percentage_24h: -0.5, image: "https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png" },
-      { id: "cardano", symbol: "ada", name: "Cardano", current_price: 0.45, price_change_percentage_24h: 1.1, image: "https://assets.coingecko.com/coins/images/975/large/cardano.png" },
-      { id: "avalanche-2", symbol: "avax", name: "Avalanche", current_price: 35.67, price_change_percentage_24h: -2.3, image: "https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite_Trans.png" },
-      { id: "polkadot", symbol: "dot", name: "Polkadot", current_price: 7.89, price_change_percentage_24h: 0.2, image: "https://assets.coingecko.com/coins/images/12171/large/polkadot.png" }
+      { id: "solana", symbol: "sol", name: "Solana", current_price: 145.2, price_change_percentage_24h: 5.4, image: "https://assets.coingecko.com/coins/images/4128/large/solana.png" },
+      { id: "sui", symbol: "sui", name: "Sui", current_price: 1.89, price_change_percentage_24h: 8.3, image: "https://assets.coingecko.com/coins/images/26375/large/sui_logo.png" },
     ];
   }
 
-  // Vite middleware for development
-  // =========================================================================
-  // STEP 4.3: FINAL ARCHITECTURE ALIGNMENT - BACKEND EXECUTION ORCHESTRATION
-  // =========================================================================
-
-  // 1. Define Trade Instruction Schema (Backend Output)
-  // (In practice, this is shared via a shared types file)
-  
-  // 2. Create API Bridge Layer
-  app.post("/api/trade/execute-intent", async (req, res) => {
-    try {
-      const { uid, action, asset, amount, strategyId } = req.body;
-      if (!uid || !action || !asset || !amount) {
-        return res.status(400).json({ error: "Missing required fields" });
+  // ── GET /api/admin/status (Admin-only) ────────────────────────────────────
+  app.get(
+    "/api/admin/status",
+    verifyFirebaseToken,
+    async (req: AuthRequest, res: Response) => {
+      if (!req.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
       }
-  
-      // AI Engine Logic (Simulated here)
-      let riskLevel = 0.05; // default 5%
-      if (strategyId === "Aggressive") riskLevel = 0.15;
-      else if (strategyId === "Scalping") riskLevel = 0.08;
-  
-      const instruction = {
-        intentId: `intent_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        action,
-        asset,
-        amount: Number(amount),
-        riskLevel,
-        strategyId: strategyId || "Momentum",
-        timestamp: Date.now()
-      };
-  
-      if (db) {
-        await db.collection("trade_intents").doc(instruction.intentId).set({
-          ...instruction,
-          uid,
-          status: "PENDING"
-        });
-      }
-  
-      return res.json({ success: true, instruction });
-    } catch (error: any) {
-      console.error("Execute Intent error:", error);
-      return res.status(500).json({ error: error.message || "Failed to generate intent" });
-    }
-  });
-  
-  app.get("/api/trade/status/:intentId", async (req, res) => {
-    try {
-      if (!db) return res.status(500).json({ error: "DB not initialized" });
-      const { intentId } = req.params;
-      const doc = await db.collection("trade_intents").doc(intentId).get();
-      if (!doc.exists) return res.status(404).json({ error: "Intent not found" });
-      return res.json({ success: true, status: doc.data()?.status });
-    } catch (error: any) {
-      return res.status(500).json({ error: error.message });
-    }
-  });
-  
-  // 6. Event Sync Layer (Backend receives execution result from frontend)
-  app.post("/api/trade/sync-result", async (req, res) => {
-    try {
-      const { uid, intentId, digest, success } = req.body;
-      if (!uid || !intentId || !digest) {
-        return res.status(400).json({ error: "Missing required sync fields" });
-      }
-  
-      if (db) {
-        await db.collection("trade_intents").doc(intentId).update({
-          status: success ? "COMPLETED" : "FAILED",
-          digest,
-          completedAt: Date.now()
-        });
-  
-        if (success) {
-          const intentDoc = await db.collection("trade_intents").doc(intentId).get();
-          const userDoc = await db.collection("users").doc(uid).get();
-          
-          if (intentDoc.exists && userDoc.exists) {
-            const intentData = intentDoc.data()!;
-            const userData = userDoc.data()!;
-  
-            const actionText = intentData.action === "START_SESSION" ? "started a trading session" : intentData.action.toLowerCase();
-            await db.collection("posts").add({
-              uid,
-              authorName: userData.displayName || "Anonymous Trader",
-              authorAvatar: userData.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`,
-              content: `Just ${actionText} with ${intentData.amount} ${intentData.asset} using the ${intentData.strategyId} strategy! 🚀 (Verified On-Chain)`,
-              timestamp: admin.firestore.FieldValue.serverTimestamp(),
-              likes: 0,
-              hasLiked: false,
-              comments: []
-            });
-  
-            await db.collection("notifications").add({
-              uid,
-              type: "TRADE_EXECUTED",
-              title: "Trade Executed",
-              message: `Your ${intentData.strategyId} trade for ${intentData.amount} ${intentData.asset} was verified on-chain. Digest: ${digest.substring(0, 8)}...`,
-              timestamp: new Date().toISOString(),
-              read: false,
-            });
-          }
-        }
-      }
-  
-      return res.json({ success: true });
-    } catch (error: any) {
-      console.error("Sync result error:", error);
-      return res.status(500).json({ error: error.message });
-    }
-  });
-
-    // Temporary route to restore balance
-    app.post("/api/restore-balance", async (req, res) => {
+      if (!db) return res.json({ status: "error", message: "Firebase Admin not initialized" });
       try {
-        if (!db) return res.status(500).json({ error: "DB missing" });
-        const snapshot = await db.collection("users").get();
-        for (const doc of snapshot.docs) {
-          await doc.ref.update({ walletBalance: 5 });
-        }
-        res.json({ success: true, message: "Restored $5 to all users" });
+        const config = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+        const testDoc = await db.collection("health_check").doc("ping").get();
+        return res.json({
+          status: "ok",
+          projectId: config.projectId,
+          databaseId: config.firestoreDatabaseId || "(default)",
+          lastPing: testDoc.exists ? testDoc.data()?.lastPing : "none",
+          priceDataAgeSeconds: priceCachedAt ? Math.round((Date.now() - priceCachedAt) / 1000) : null,
+          priceDataAvailable: priceCache !== null,
+        });
       } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        return res.status(500).json({ status: "error", message: e.message });
       }
-    });
+    }
+  );
 
+  // NOTE: /api/restore-balance has been permanently removed.
+  // It was an unauthenticated endpoint that could reset ALL user balances.
+
+  // ── Vite Dev / Production Static ──────────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1142,14 +1062,15 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
   }
 
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Quantum Finance Server running on http://localhost:${PORT}`);
-    });
-  }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 Quantum Finance running on http://localhost:${PORT}`);
+    console.log(`🔐 Auth: Firebase ID token verification ENABLED on all financial routes`);
+    console.log(`📊 Trading: Real market data engine ACTIVE (CoinGecko)`);
+    console.log(`🛡️  Rate limiting: ACTIVE (10 req/min financial, 60 req/min general)`);
+  });
+}
 
 startServer();
