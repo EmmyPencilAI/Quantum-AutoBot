@@ -458,8 +458,8 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
             </div>
             <p className="text-[10px] text-white/40 mb-2">
               {isMobileDevice()
-                ? "Install the Sui Wallet app to connect on mobile. After installing, open this page from the wallet's built-in browser."
-                : "Install a Sui wallet browser extension to connect. Sui Wallet, Suiet, and Ethos are supported."
+                ? "Open this page from your Slush (Sui Wallet) app's built-in browser to connect. Tap the browser icon inside the Slush app, then navigate to this URL."
+                : "Install a Sui wallet browser extension to connect. Sui Wallet, Slush, Suiet, and Ethos are supported."
               }
             </p>
             <a

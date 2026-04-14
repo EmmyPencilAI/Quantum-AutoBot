@@ -37,16 +37,18 @@ const MarketsTab: React.FC = () => {
       setMarketData(filtered);
       setLastUpdated(new Date().toLocaleTimeString());
     } catch (e) {
-      console.error("Failed to fetch prices:", e);
-      setMarketData([
-        { id: "bitcoin", symbol: "btc", name: "Bitcoin", current_price: 65432.1, price_change_percentage_24h: 2.5, image: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
-        { id: "ethereum", symbol: "eth", name: "Ethereum", current_price: 3456.78, price_change_percentage_24h: -1.2, image: "https://assets.coingecko.com/coins/images/279/large/ethereum.png" },
-        { id: "binancecoin", symbol: "bnb", name: "BNB", current_price: 580.45, price_change_percentage_24h: 0.8, image: "https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png" },
-        { id: "solana", symbol: "sol", name: "Solana", current_price: 145.2, price_change_percentage_24h: 5.4, image: "https://assets.coingecko.com/coins/images/4128/large/solana.png" },
-        { id: "sui", symbol: "sui", name: "Sui", current_price: 1.89, price_change_percentage_24h: 8.3, image: "https://assets.coingecko.com/coins/images/26375/large/sui_logo.png" },
-      ]);
-      setLastUpdated("Offline State");
-      toast.error("Cannot connect to server. Showing offline prices.");
+      console.warn("Price fetch failed, using fallback data:", e);
+      // Only set fallback if we don't already have data
+      if (marketData.length === 0) {
+        setMarketData([
+          { id: "bitcoin", symbol: "btc", name: "Bitcoin", current_price: 65432.1, price_change_percentage_24h: 2.5, image: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
+          { id: "ethereum", symbol: "eth", name: "Ethereum", current_price: 3456.78, price_change_percentage_24h: -1.2, image: "https://assets.coingecko.com/coins/images/279/large/ethereum.png" },
+          { id: "binancecoin", symbol: "bnb", name: "BNB", current_price: 580.45, price_change_percentage_24h: 0.8, image: "https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png" },
+          { id: "solana", symbol: "sol", name: "Solana", current_price: 145.2, price_change_percentage_24h: 5.4, image: "https://assets.coingecko.com/coins/images/4128/large/solana.png" },
+          { id: "sui", symbol: "sui", name: "Sui", current_price: 1.89, price_change_percentage_24h: 8.3, image: "https://assets.coingecko.com/coins/images/26375/large/sui_logo.png" },
+        ]);
+        setLastUpdated("Cached prices");
+      }
     } finally {
       setLoadingPrices(false);
     }

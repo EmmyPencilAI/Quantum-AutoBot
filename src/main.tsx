@@ -19,7 +19,7 @@ createRoot(document.getElementById('root')!).render(
       <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
         <WalletProvider
           autoConnect={true}
-          preferredWallets={['Sui Wallet', 'Suiet', 'Ethos Wallet']}
+          preferredWallets={['Sui Wallet', 'Slush', 'Suiet', 'Ethos Wallet']}
         >
           <App />
         </WalletProvider>
