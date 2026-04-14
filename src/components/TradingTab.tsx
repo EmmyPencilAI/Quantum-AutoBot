@@ -127,16 +127,21 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         return;
       }
 
-      // Move funds from wallet balance to trading balance and active pair
-      const existingInvestment = userDoc.exists() ? (userDoc.data().initialInvestment || 0) : 0;
+      // Only add to existing investment if user is actively trading
+      // Otherwise reset to prevent stale balance accumulation
+      const isCurrentlyTrading = userDoc.exists() ? (userDoc.data().isTrading || false) : false;
+      const existingInvestment = isCurrentlyTrading ? (userDoc.data().initialInvestment || 0) : 0;
       const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
-      const existingAssetBalance = userDoc.exists() ? (userDoc.data()[balanceField] || 0) : 0;
+      const existingAssetBalance = isCurrentlyTrading ? (userDoc.data()[balanceField] || 0) : 0;
       
       await updateDoc(userRef, {
         initialInvestment: existingInvestment + fundAmountNum,
         [balanceField]: existingAssetBalance + fundAmountNum,
+        // Clear stale values from the other asset when not trading
+        ...(isCurrentlyTrading ? {} : { usdtBalance: tradingAsset === "USDT" ? fundAmountNum : 0, usdcBalance: tradingAsset === "USDC" ? fundAmountNum : 0 }),
         walletBalance: currentWalletBalance - fundAmountNum,
         tradingAsset: tradingAsset,
+        totalProfit: isCurrentlyTrading ? (userDoc.data().totalProfit || 0) : 0,
       });
 
       toast.success(`Funded $${fundAmountNum.toFixed(2)} to trading account!`, { id: "fund" });
@@ -579,13 +584,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                         <div className="min-w-0">
                           <p className="font-bold text-xs md:text-base truncate">{trade.pair}</p>
                           <p className="text-[9px] md:text-xs text-white/40 truncate">
-                            {trade.amount?.toFixed(2) || "0.00"} USDT • {trade.duration || 0}s
+                            {(trade.amount && trade.amount >= 0.01) ? trade.amount.toFixed(2) : (trade.amount ? trade.amount.toFixed(6) : "0.00")} USDT • {trade.duration || 0}s
                           </p>
                         </div>
                       </div>
                       <div className="text-right shrink-0">
                         <p className={`font-bold text-xs md:text-base ${trade.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                          {trade.pnl >= 0 ? "+" : ""}{trade.pnl.toFixed(4)} USDT
+                          {trade.pnl >= 0 ? "+" : ""}{Math.abs(trade.pnl) >= 0.01 ? trade.pnl.toFixed(4) : trade.pnl.toFixed(8)} USDT
                         </p>
                         <p className="text-[9px] md:text-xs text-white/40">{trade.time}</p>
                       </div>

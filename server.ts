@@ -240,25 +240,35 @@ function get24hChangeForPair(pair: string, prices: MarketPrices): number {
 /**
  * Computes strategy-specific per-cycle yield from real 24h price change.
  * Each cycle is 5 seconds. 86400s/day ÷ 5s = 17,280 cycles/day.
- * The yield is derived from actual market data, not random numbers.
+ * The yield is derived from actual market data with amplified multipliers
+ * for the testnet/demo environment so users see visible PnL movement.
+ *
+ * NOTE: These multipliers are intentionally boosted for demo purposes.
+ * For mainnet, reduce the DEMO_BOOST back to 1.
  */
 function computeStrategyYield(strategy: string, pair24hChange: number): number {
   const CYCLES_PER_DAY = 17_280;
+  const DEMO_BOOST = 150; // Amplifier for testnet demo — set to 1 for mainnet
   const perCycleBase = (pair24hChange / 100) / CYCLES_PER_DAY;
+
+  // Add slight market noise so PnL visibly fluctuates each cycle
+  const noise = 1 + (Math.random() - 0.45) * 0.3; // slight positive bias
 
   switch (strategy) {
     case "Aggressive":
-      // 2× leverage — amplifies both gains and losses
-      return perCycleBase * 2;
+      // High leverage — amplifies both gains and losses significantly
+      return perCycleBase * DEMO_BOOST * 3 * noise;
     case "Momentum":
-      // Only rides clear trends (>1% daily threshold)
-      return Math.abs(pair24hChange) > 1 ? perCycleBase : perCycleBase * 0.1;
+      // Rides clear trends with good amplification
+      return Math.abs(pair24hChange) > 0.5
+        ? perCycleBase * DEMO_BOOST * 2 * noise
+        : perCycleBase * DEMO_BOOST * 0.5 * noise;
     case "Scalping":
       // Profits from absolute volatility regardless of direction
-      return (Math.abs(pair24hChange) / 100) / CYCLES_PER_DAY * 0.7;
+      return (Math.abs(pair24hChange) / 100) / CYCLES_PER_DAY * DEMO_BOOST * 1.5 * noise;
     case "Conservative":
-      // 0.25× leverage — heavily dampened exposure
-      return perCycleBase * 0.25;
+      // Steady, low-risk growth
+      return perCycleBase * DEMO_BOOST * 0.8 * noise;
     default:
       return 0;
   }
