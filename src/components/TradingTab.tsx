@@ -44,7 +44,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setStrategy(data.activeStrategy || "Momentum");
         setSelectedPair(data.activePair || "BTC / USDT");
         setPnl(data.totalProfit || 0);
-        setInitialInvestment(data.isTrading ? (data.initialInvestment || 0) : 0);
+        setInitialInvestment(data.initialInvestment || 0);
         setWalletBalance(data.walletBalance || 0);
         if (data.tradingAsset) setTradingAsset(data.tradingAsset);
         if (data.tradingSessionId) setTradingSessionId(data.tradingSessionId);
@@ -127,10 +127,14 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         return;
       }
 
-      // Move funds from wallet balance to trading balance
+      // Move funds from wallet balance to trading balance and active pair
       const existingInvestment = userDoc.exists() ? (userDoc.data().initialInvestment || 0) : 0;
+      const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+      const existingAssetBalance = userDoc.exists() ? (userDoc.data()[balanceField] || 0) : 0;
+      
       await updateDoc(userRef, {
         initialInvestment: existingInvestment + fundAmountNum,
+        [balanceField]: existingAssetBalance + fundAmountNum,
         walletBalance: currentWalletBalance - fundAmountNum,
         tradingAsset: tradingAsset,
       });
@@ -186,11 +190,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       const profit = data.totalProfit || 0;
       const totalReturn = currentInvestment + profit;
 
-      // Return all funds (investment + profit) to wallet balance
+      // Return all funds (investment + profit) to wallet balance and clear trading states
       await updateDoc(userRef, {
         isTrading: false,
         walletBalance: currentWalletBalance + totalReturn,
         initialInvestment: 0,
+        usdtBalance: 0,
+        usdcBalance: 0,
         totalProfit: 0,
         tradingSessionId: null,
       });
