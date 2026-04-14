@@ -49,7 +49,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setStrategy(data.activeStrategy || "Momentum");
         setSelectedPair(data.activePair || "BTC / USDT");
         setPnl(data.totalProfit || 0);
-          setInitialInvestment(data.isTrading ? (data.initialInvestment || 0) : 0);
+        setInitialInvestment(data.isTrading ? (data.initialInvestment || 0) : 0);
+        if (data.tradingAsset) setTradingAsset(data.tradingAsset);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -278,14 +279,40 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         else if (tradingAsset === "USDC") currentOnChainBalance = balances.usdc;
         else currentOnChainBalance = balances.usdt;
 
-        if (amount > currentOnChainBalance) {
-          toast.error(`Insufficient on-chain balance. You have ${currentOnChainBalance.toFixed(2)} ${tradingAsset}.`, { id: "fund" });
+        const userRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userRef);
+        const currentWalletBalance = userDoc.exists() ? (userDoc.data().walletBalance || 0) : 0;
+        
+        const useInternalBalance = amount <= currentWalletBalance;
+
+        if (amount > currentOnChainBalance && !useInternalBalance) {
+          toast.error(`Insufficient balance. You have ${currentOnChainBalance.toFixed(2)} ${tradingAsset} on-chain and ${currentWalletBalance.toFixed(2)} USD in app wallet.`, { id: "fund" });
           setLoading(false);
           return;
         }
 
-        if (balances.sui < 0.01) {
+        if (!useInternalBalance && balances.sui < 0.01) {
           toast.error("Insufficient SUI for gas. Please receive some SUI first.", { id: "fund" });
+          setLoading(false);
+          return;
+        }
+
+        if (useInternalBalance) {
+          console.log(`Funding ${amount} from internal app balance...`);
+          const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
+          await updateDoc(userRef, {
+            isTrading: true,
+            initialInvestment: amount,
+            [balanceField]: amount,
+            walletBalance: currentWalletBalance - amount,
+            tradingAsset: tradingAsset,
+            activeStrategy: strategy,
+            activePair: selectedPair,
+            totalProfit: 0,
+            tradingSessionId: null
+          });
+          toast.success(`Successfully funded ${amount} ${tradingAsset} from your App Wallet!`, { id: "fund" });
+          setFundAmount("0");
           setLoading(false);
           return;
         }
