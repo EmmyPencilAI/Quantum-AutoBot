@@ -360,8 +360,8 @@ async function processBackgroundTrades(): Promise<void> {
         marketDataSource: "coingecko_live",
       });
 
-      // Only record trade if PnL is meaningful
-      if (Math.abs(cyclePnl) > 0.0001) {
+      // Only record trade if PnL is meaningful (lowered threshold for small balances)
+      if (Math.abs(cyclePnl) > 0.000001) {
         const tradeRef = db.collection("trades").doc();
         batch.set(tradeRef, {
           uid: userData.uid,

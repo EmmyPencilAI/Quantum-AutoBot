@@ -188,9 +188,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       const currentWalletBalance = data.walletBalance || 0;
       const currentInvestment = data.initialInvestment || 0;
       const profit = data.totalProfit || 0;
-      const totalReturn = currentInvestment + profit;
+      
+      // Use the actual trading engine balance as source of truth
+      // The backend modifies usdtBalance/usdcBalance every cycle
+      const asset = data.tradingAsset || "USDT";
+      const engineBalance = asset === "USDC" ? (data.usdcBalance || 0) : (data.usdtBalance || 0);
+      
+      // The real return is the engine balance (which already includes profits/losses)
+      // If engine never ran (balance is 0 but investment exists), fall back to investment + profit
+      const totalReturn = engineBalance > 0 ? engineBalance : (currentInvestment + profit);
 
-      // Return all funds (investment + profit) to wallet balance and clear trading states
+      // Return all funds to wallet balance and clear trading states
       await updateDoc(userRef, {
         isTrading: false,
         walletBalance: currentWalletBalance + totalReturn,
@@ -201,10 +209,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         tradingSessionId: null,
       });
 
-      if (totalReturn > currentInvestment) {
-        toast.success(`Trade closed! Returned $${totalReturn.toFixed(2)} (Profit: +$${profit.toFixed(2)})`, { id: "stop" });
-      } else if (profit < 0) {
-        toast.success(`Trade closed. Returned $${totalReturn.toFixed(2)} (Loss: $${profit.toFixed(2)})`, { id: "stop" });
+      const actualProfit = totalReturn - currentInvestment;
+      if (actualProfit > 0.001) {
+        toast.success(`Trade closed! Returned $${totalReturn.toFixed(2)} (Profit: +$${actualProfit.toFixed(2)})`, { id: "stop" });
+      } else if (actualProfit < -0.001) {
+        toast.success(`Trade closed. Returned $${totalReturn.toFixed(2)} (Loss: $${actualProfit.toFixed(2)})`, { id: "stop" });
       } else {
         toast.success(`Trade closed. $${totalReturn.toFixed(2)} returned to wallet.`, { id: "stop" });
       }
