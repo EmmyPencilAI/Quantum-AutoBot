@@ -17,7 +17,10 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
-        <WalletProvider>
+        <WalletProvider
+          autoConnect={true}
+          preferredWallets={['Sui Wallet', 'Suiet', 'Ethos Wallet']}
+        >
           <App />
         </WalletProvider>
       </SuiClientProvider>

@@ -54,7 +54,7 @@ const App: React.FC = () => {
                 uid: user.uid,
                 displayName: user.displayName || "Quantum Trader",
                 avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-                  suiWallet: "Pending Web3 Wallet", // No longer generating keypair, but firestore rules demand a string
+                suiWallet: null, // Will be set when user connects + verifies a wallet
                 suiBalance: 0,
                 walletBalance: 0, // Starting wallet balance
                 usdtBalance: 0, 
@@ -69,7 +69,8 @@ const App: React.FC = () => {
               const userData = userSnap.data() as Partial<UserProfile>;
               const updates: Partial<UserProfile> = {};
               
-              if (!userData?.suiWallet) updates.suiWallet = "Pending Web3 Wallet";
+              // suiWallet presence is now tracked as null vs valid address
+              // No need to backfill with sentinel strings
               
               // Fix corrupted trading state: isTrading=true without a session
               if (userData?.isTrading === true && !userData?.tradingSessionId) {
@@ -163,7 +164,7 @@ const App: React.FC = () => {
               </div>
               <h1 className="text-4xl md:text-6xl font-bold tracking-tighter uppercase italic leading-none">Quantum Finance</h1>
               <p className="text-base md:text-xl text-white/60 font-medium max-w-[280px] md:max-w-none mx-auto">
-                The next generation of non-custodial trading on Sui. Powered by zkLogin.
+                The next generation of non-custodial trading on Sui. Secure. Transparent. On-chain.
               </p>
             </div>
 

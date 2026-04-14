@@ -19,7 +19,9 @@ export interface UserProfile {
   email?: string;
   photoURL?: string;
   avatar?: string;
-  suiWallet: string;
+  suiWallet: string | null;
+  walletVerified?: boolean;       // true after message-signing verification
+  walletLinkedAt?: string;        // ISO timestamp of when wallet was linked
 
   // Financial state
   walletBalance: number;

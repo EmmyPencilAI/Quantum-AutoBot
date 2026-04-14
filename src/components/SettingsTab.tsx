@@ -211,8 +211,8 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ user }) => {
                 <Wallet size={18} className="md:w-5 md:h-5" />
               </div>
               <div>
-                <p className="font-bold text-sm md:text-base">zkLogin Status</p>
-                <p className="text-[10px] md:text-xs text-white/40">Verified via Google</p>
+                <p className="font-bold text-sm md:text-base">Authentication</p>
+                <p className="text-[10px] md:text-xs text-white/40">Firebase Auth via {user?.providerData?.[0]?.providerId || "OAuth"}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 text-green-400 text-[10px] md:text-xs font-bold uppercase tracking-widest">

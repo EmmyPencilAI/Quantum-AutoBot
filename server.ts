@@ -87,9 +87,14 @@ if (fs.existsSync(firebaseConfigPath)) {
       console.error(`Failed to connect to named database ${dbId}:`, e.message);
       try {
         db = getFirestore(adminApp, "(default)");
-        console.log("Firebase Admin connected to (default) database");
+        // Perform health check on default database to verify credentials exist
+        await db.collection("health_check").doc("ping").set({
+          lastPing: new Date().toISOString(),
+        });
+        console.log("✅ Firebase Admin connected to (default) database");
       } catch (e2: any) {
-        console.error("Critical: All Firebase connections failed:", e2.message);
+        console.error("Critical: All Firebase connections failed. Check GOOGLE_APPLICATION_CREDENTIALS:", e2.message);
+        db = null; // Important: Clear the db instance so the background trading loop doesn't spin
       }
     }
   } catch (e) {
@@ -536,6 +541,145 @@ async function startServer() {
       });
 
       return res.json({ success: true, newWalletBalance, txHash, message: "Withdrawal successful." });
+    }
+  );
+
+  // ── POST /api/wallet/claim-legacy ───────────────────────────────────────
+  // Self-service migration: users claim their Web2 legacy balance to their
+  // verified on-chain wallet. One-time claim per user.
+  app.post(
+    "/api/wallet/claim-legacy",
+    financialLimit,
+    verifyFirebaseToken,
+    requireSelfOrAdmin,
+    async (req: AuthRequest, res: Response) => {
+      if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+      const { uid } = req.body;
+      if (!uid) return res.status(400).json({ error: "Missing uid" });
+
+      if (!process.env.SUI_PRIVATE_KEY) {
+        return res.status(503).json({
+          error: "On-chain claims are currently unavailable. Treasury not configured.",
+        });
+      }
+
+      const userRef = db.collection("users").doc(uid);
+      let claimAmount: number;
+      let walletAddress: string;
+
+      // ── ATOMIC claim: verify wallet, check balance, mark claimed ──
+      try {
+        const result = await db.runTransaction(async (t) => {
+          const snap = await t.get(userRef);
+          if (!snap.exists) throw new Error("User not found");
+
+          const data = snap.data()!;
+          const balance = data.walletBalance || 0;
+          if (balance <= 0) throw new Error("No legacy balance to claim. Your balance is 0.");
+
+          const wallet = data.suiWallet;
+          if (!wallet || wallet === "Pending Web3 Wallet" || wallet.length < 66) {
+            throw new Error("No verified wallet linked. Please connect and verify your wallet first.");
+          }
+
+          if (data.walletVerified !== true) {
+            throw new Error("Wallet not verified. Please verify wallet ownership before claiming.");
+          }
+
+          if (data.legacyClaimed === true) {
+            throw new Error("Legacy balance has already been claimed.");
+          }
+
+          // Atomically set balance to 0 and mark as claimed
+          t.update(userRef, {
+            walletBalance: 0,
+            legacyClaimed: true,
+            legacyClaimTimestamp: new Date().toISOString(),
+            legacyClaimAmount: balance,
+          });
+
+          return { amount: balance, address: wallet };
+        });
+
+        claimAmount = result.amount;
+        walletAddress = result.address;
+      } catch (e: any) {
+        const isUserError = ["No legacy", "No verified", "not verified", "already been", "not found"]
+          .some(msg => e.message?.includes(msg));
+        return res.status(isUserError ? 400 : 500).json({ error: e.message });
+      }
+
+      // ── On-chain transfer from treasury → user wallet ──
+      let txHash: string | null = null;
+      try {
+        const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY!);
+        const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+        const txb = new Transaction();
+        const coinType = USDC_TYPE; // Legacy balances are denominated in USD → USDC
+        const decimals = await getDecimals(coinType);
+        const rawAmount = Math.floor(claimAmount * Math.pow(10, decimals));
+        const coins = await suiClient.getCoins({ owner: keypair.toSuiAddress(), coinType });
+
+        if (coins.data.length === 0) {
+          // Rollback the claim
+          console.error("CRITICAL: Treasury has no USDC for legacy claim. Rolling back.");
+          await userRef.update({
+            walletBalance: claimAmount,
+            legacyClaimed: false,
+            legacyClaimTimestamp: null,
+            legacyClaimAmount: null,
+          });
+          return res.status(503).json({
+            error: "Treasury has insufficient USDC to process your claim. Please try again later or contact support.",
+          });
+        }
+
+        const ids = coins.data.map((c) => c.coinObjectId);
+        if (ids.length > 1) txb.mergeCoins(txb.object(ids[0]), ids.slice(1).map((id) => txb.object(id)));
+        const [mainCoin] = txb.splitCoins(txb.object(ids[0]), [rawAmount]);
+        txb.transferObjects([mainCoin], walletAddress);
+        txb.setGasBudget(10_000_000);
+
+        const result = await suiClient.signAndExecuteTransaction({ signer: keypair, transaction: txb });
+        await suiClient.waitForTransaction({ digest: result.digest });
+        txHash = result.digest;
+        console.log(`✅ Legacy claim TX: ${txHash} | User: ${uid} | Amount: ${claimAmount} USDC | To: ${walletAddress}`);
+      } catch (e: any) {
+        // Rollback on failure
+        console.error("Legacy claim on-chain transfer failed — rolling back:", e.message);
+        await userRef.update({
+          walletBalance: claimAmount,
+          legacyClaimed: false,
+          legacyClaimTimestamp: null,
+          legacyClaimAmount: null,
+        });
+        return res.status(500).json({
+          error: "On-chain transfer failed. No funds were deducted. Please try again.",
+          details: e.message,
+        });
+      }
+
+      // Record audit notification
+      await db.collection("notifications").add({
+        uid,
+        type: "LEGACY_CLAIM",
+        title: "Legacy Balance Claimed",
+        message: `Successfully claimed ${claimAmount.toFixed(2)} USDC from your legacy Web2 balance to your on-chain wallet.`,
+        amount: claimAmount,
+        asset: "USDC",
+        txHash,
+        timestamp: new Date().toISOString(),
+        read: false,
+      });
+
+      return res.json({
+        success: true,
+        claimedAmount: claimAmount,
+        txHash,
+        walletAddress,
+        message: `Successfully claimed ${claimAmount.toFixed(2)} USDC to ${walletAddress.slice(0, 8)}...`,
+      });
     }
   );
 

@@ -3,7 +3,7 @@ import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, T
 import { motion, AnimatePresence } from "motion/react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
-import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc, getDoc } from "firebase/firestore";
 import { buildTransferOnChainPTB, buildStartSessionPTB, buildWithdrawSessionPTB, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
 import { buildPTBFromTradeInstruction } from "../lib/tradeInstructions";
 import { useCurrentAccount } from "@mysten/dapp-kit";
@@ -115,7 +115,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               initialInvestment: 0,
               totalProfit: 0,
               tradingSessionId: null,
-              suiWallet: "Pending Web3 Wallet" // Retroactive fix allowing firestore rules to pass
             });
             setIsTrading(false);
             setLoading(false);
