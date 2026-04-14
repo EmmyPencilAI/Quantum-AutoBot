@@ -369,7 +369,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           }),
         });
 
-        const userRef = doc(db, "users", user.uid);
+        // const userRef = doc(db, "users", user.uid); // Already defined above
         const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
         await updateDoc(userRef, {
           isTrading: true,
