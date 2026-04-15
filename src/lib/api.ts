@@ -35,7 +35,11 @@ export async function fetchWithAuth(
     }
   }
 
-  return fetch(url, {
+  // If an API URL is specified, prepend it to relative /api/ routes
+  const baseUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "";
+  const finalUrl = url.startsWith("/api/") ? `${baseUrl}${url}` : url;
+
+  return fetch(finalUrl, {
     ...options,
     headers: {
       "Content-Type": "application/json",
