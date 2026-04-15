@@ -282,22 +282,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       } else {
         toast.success(`Trade closed. $${totalReturn.toFixed(2)} returned to wallet.`, { id: "stop" });
       }
-
-      // Add Trade Session End marker to database natively
-      if (currentInvestment > 0) {
-        await setDoc(doc(collection(db, "trades")), {
-          uid: user.uid,
-          pair: selectedPair,
-          type: "SESSION_END",
-          amount: Math.abs(actualProfit),
-          asset: asset,
-          pnl: actualProfit,
-          strategy: strategy,
-          timestamp: new Date().toISOString(),
-          isMarker: true,
-          markerLabel: actualProfit >= 0 ? `+${actualProfit.toFixed(2)}` : `${actualProfit.toFixed(2)}`
-        });
-      }
       
     } catch (e: any) {
       console.error("Stop trading failed:", e);
