@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2, ArrowDownLeft, DollarSign, Wallet } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { AreaChart, Area, BarChart, Bar, Cell, ReferenceDot, Label, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc, getDoc } from "firebase/firestore";
 import { buildTransferOnChainPTB, buildStartSessionPTB, buildWithdrawSessionPTB, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
@@ -11,9 +11,69 @@ import { useInitExecutionAdapter } from "../lib/executionAdapter";
 import { apiFetch } from "../lib/api";
 import { toast } from "sonner";
 
+// ── TradingView Candlestick Chart Component ─────────────────────────────────
+const tvSymbolMap: Record<string, string> = {
+  "BTC / USDT": "BINANCE:BTCUSDT",
+  "ETH / USDT": "BINANCE:ETHUSDT",
+  "BNB / USDT": "BINANCE:BNBUSDT",
+  "SOL / USDT": "BINANCE:SOLUSDT",
+  "SUI / USDT": "BINANCE:SUIUSDT",
+  "XRP / USDT": "BINANCE:XRPUSDT",
+  "ADA / USDT": "BINANCE:ADAUSDT",
+  "DOGE / USDT": "BINANCE:DOGEUSDT",
+  "AVAX / USDT": "BINANCE:AVAXUSDT",
+  "MATIC / USDT": "BINANCE:MATICUSDT",
+};
+
+const TradingViewChart: React.FC<{ pair: string }> = ({ pair }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const container = containerRef.current;
+    container.innerHTML = "";
+
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.type = "text/javascript";
+    script.async = true;
+    script.innerHTML = JSON.stringify({
+      autosize: true,
+      symbol: tvSymbolMap[pair] || "BINANCE:BTCUSDT",
+      interval: "15",
+      timezone: "Etc/UTC",
+      theme: "dark",
+      style: "1",
+      locale: "en",
+      backgroundColor: "rgba(10, 10, 10, 1)",
+      gridColor: "rgba(255, 255, 255, 0.03)",
+      hide_top_toolbar: false,
+      hide_legend: false,
+      allow_symbol_change: false,
+      save_image: false,
+      calendar: false,
+      hide_volume: false,
+      support_host: "https://www.tradingview.com",
+    });
+
+    container.appendChild(script);
+
+    return () => {
+      container.innerHTML = "";
+    };
+  }, [pair]);
+
+  return (
+    <div className="tradingview-widget-container h-[300px] md:h-[450px] w-full rounded-xl overflow-hidden">
+      <div ref={containerRef} className="h-full w-full" />
+    </div>
+  );
+};
+
 interface TradingTabProps {
   user: any;
 }
+
 
 const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   // ── State ─────────────────────────────────────────────────────────────────
@@ -494,13 +554,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             </div>
           </div>
 
-          {/* Live PnL Chart */}
+          {/* Live PnL + TradingView Chart */}
           <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden shadow-2xl">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 md:mb-8">
               <div>
                 <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Live Profit/Loss</p>
                 <h3 className={`text-3xl md:text-5xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} <span className="text-base md:text-2xl opacity-60">USDT</span>
+                  {pnl >= 0 ? "+" : ""}{pnl.toFixed(4)} <span className="text-base md:text-2xl opacity-60">USDT</span>
                 </h3>
               </div>
               <div className="sm:text-right">
@@ -509,63 +569,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               </div>
             </div>
 
-            <div className="h-40 md:h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={history} margin={{ top: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                  <XAxis dataKey="time" hide />
-                  <YAxis hide domain={["auto", "auto"]} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "#0a0a0a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "12px", zIndex: 10 }}
-                    cursor={{ fill: "rgba(255,255,255,0.05)" }}
-                    formatter={(value: any) => {
-                      const num = Number(value);
-                      return [<span style={{ color: num >= 0 ? "#4ade80" : "#f87171" }}>{num >= 0 ? `+${num.toFixed(4)}` : num.toFixed(4)}</span>, "PnL"];
-                    }}
-                  />
-                  
-                  {/* Map ReferenceDots for Session End markers */}
-                  {history.map((entry, index) => {
-                    if (entry.isMarker) {
-                      return (
-                        <ReferenceDot 
-                          key={`marker-${index}`} 
-                          x={entry.time} 
-                          y={entry.value} 
-                          r={5} 
-                          fill={entry.value >= 0 ? "#4ade80" : "#f87171"} 
-                          stroke="white" 
-                          strokeWidth={2}
-                          isFront={true}
-                        >
-                          <Label 
-                            value={`Exit: ${entry.markerLabel}`} 
-                            position="top" 
-                            fill="white" 
-                            fontSize={12} 
-                            fontWeight="bold"
-                            style={{ 
-                              textShadow: "0px 2px 4px rgba(0,0,0,0.8)" 
-                            }} 
-                            offset={10} 
-                          />
-                        </ReferenceDot>
-                      );
-                    }
-                    return null;
-                  })}
-
-                  <Bar dataKey="value" radius={[2, 2, 0, 0]} animationDuration={500}>
-                    {history.map((entry, index) => (
-                      <Cell 
-                        key={`cell-${index}`} 
-                        fill={entry.isMarker ? (entry.value >= 0 ? "#ffffff" : "#ffffff") : (entry.value >= 0 ? "#4ade80" : "#f87171")} 
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            {/* TradingView Candlestick Chart */}
+            <TradingViewChart pair={selectedPair} />
           </div>
 
           {/* PnL Stats */}

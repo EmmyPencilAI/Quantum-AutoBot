@@ -263,15 +263,16 @@ function get24hChangeForPair(pair: string, prices: MarketPrices): number {
 /**
  * Computes strategy-specific per-cycle yield from real 24h price change.
  * Each cycle is 5 seconds. 86400s/day ÷ 5s = 17,280 cycles/day.
- * The yield is derived from actual market data with amplified multipliers
- * for the testnet/demo environment so users see visible PnL movement.
+ * The yield is derived from actual market data — direction follows the real market.
  *
- * NOTE: These multipliers are intentionally boosted for demo purposes.
- * For mainnet, reduce the DEMO_BOOST back to 1.
+ * YIELD_BOOST controls visibility:
+ *   - mainnet (production): 1 — true 1:1 market yields, financially safe
+ *   - testnet (demo): 50 — amplifies so users see PnL movement in minutes, not days
  */
 function computeStrategyYield(strategy: string, pair24hChange: number): number {
   const CYCLES_PER_DAY = 17_280;
-  const DEMO_BOOST = 1; // Real market yields — no artificial amplification on any network
+  const isMainnet = process.env.VITE_MODE === "production";
+  const YIELD_BOOST = isMainnet ? 1 : 50; // testnet=50 (visible), mainnet=1 (real)
   const perCycleBase = (pair24hChange / 100) / CYCLES_PER_DAY;
 
   // Add slight market noise so PnL visibly fluctuates each cycle
@@ -280,18 +281,18 @@ function computeStrategyYield(strategy: string, pair24hChange: number): number {
   switch (strategy) {
     case "Aggressive":
       // High leverage — amplifies both gains and losses significantly
-      return perCycleBase * DEMO_BOOST * 3 * noise;
+      return perCycleBase * YIELD_BOOST * 3 * noise;
     case "Momentum":
       // Rides clear trends with good amplification
       return Math.abs(pair24hChange) > 0.5
-        ? perCycleBase * DEMO_BOOST * 2 * noise
-        : perCycleBase * DEMO_BOOST * 0.5 * noise;
+        ? perCycleBase * YIELD_BOOST * 2 * noise
+        : perCycleBase * YIELD_BOOST * 0.5 * noise;
     case "Scalping":
       // Profits from absolute volatility regardless of direction
-      return (Math.abs(pair24hChange) / 100) / CYCLES_PER_DAY * DEMO_BOOST * 1.5 * noise;
+      return (Math.abs(pair24hChange) / 100) / CYCLES_PER_DAY * YIELD_BOOST * 1.5 * noise;
     case "Conservative":
       // Steady, low-risk growth
-      return perCycleBase * DEMO_BOOST * 0.8 * noise;
+      return perCycleBase * YIELD_BOOST * 0.8 * noise;
     default:
       return 0;
   }
