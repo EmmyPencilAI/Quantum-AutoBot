@@ -348,7 +348,12 @@ if (db) {
   setTimeout(postBotMessage, 10_000);           // One post 10s after startup
 }
 
-// ─── Real Data-Driven Background Trading Engine ───────────────────────────────
+// ─── Smart Stop-Loss Background Trading Engine ────────────────────────────────
+// Users only earn when the market is favorable. When the market dips, the engine
+// PAUSES their position instead of applying losses. Balance only goes up or stays flat.
+let pausedCycleCount = 0;
+let profitCycleCount = 0;
+
 async function processBackgroundTrades(): Promise<void> {
   if (!db) return;
 
@@ -368,6 +373,8 @@ async function processBackgroundTrades(): Promise<void> {
 
     const batch = db.batch();
     const now = new Date().toISOString();
+    let cycleProfit = 0;
+    let cyclePaused = 0;
 
     for (const userDoc of tradingUsers.docs) {
       const userData = userDoc.data();
@@ -377,45 +384,73 @@ async function processBackgroundTrades(): Promise<void> {
       const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
       const currentBalance = userData[balanceField] || 0;
 
-      if (currentBalance <= 0) continue; // No balance, no trades
+      if (currentBalance <= 0) continue;
 
       // Compute data-driven yield using real market signal
       const pair24hChange = get24hChangeForPair(activePair, prices);
       const yieldRate = computeStrategyYield(strategy, pair24hChange);
-      const cyclePnl = currentBalance * yieldRate;
-      const newBalance = Math.max(0, currentBalance + cyclePnl); // Floor at 0
-      const newTotalProfit = (userData.totalProfit || 0) + cyclePnl;
+      const rawPnl = currentBalance * yieldRate;
 
-      batch.update(userDoc.ref, {
-        [balanceField]: newBalance,
-        totalProfit: newTotalProfit,
-        lastTradeAt: now,
-        activePairChange24h: pair24hChange,
-        marketDataSource: "coingecko_live",
-      });
+      // ═══════════════════════════════════════════════════════════════
+      // SMART STOP-LOSS: If yield is negative, PAUSE instead of losing
+      // Balance stays flat during downturns, only grows during uptrends
+      // ═══════════════════════════════════════════════════════════════
+      const cyclePnl = rawPnl > 0 ? rawPnl : 0;
+      const isPaused = rawPnl <= 0;
 
-      // Only record trade if PnL is meaningful (lowered threshold for small balances)
-      if (Math.abs(cyclePnl) > 0.000001) {
-        const tradeRef = db.collection("trades").doc();
-        batch.set(tradeRef, {
-          uid: userData.uid,
-          pair: activePair,
-          type: cyclePnl >= 0 ? "BUY" : "SELL",
-          amount: Math.abs(cyclePnl),
-          asset: tradingAsset,
-          price: prices.bitcoin?.usd ?? 65000,
-          pnl: cyclePnl,
-          strategy,
-          pair24hChange,
-          dataSource: "coingecko_live",
-          timestamp: now,
-          duration: 5, // 5-second cycle
+      if (isPaused) {
+        cyclePaused++;
+        batch.update(userDoc.ref, {
+          lastTradeAt: now,
+          activePairChange24h: pair24hChange,
+          marketDataSource: "coingecko_live",
+          engineStatus: "PROTECTED",
         });
+      } else {
+        cycleProfit++;
+        const newBalance = currentBalance + cyclePnl;
+        const newTotalProfit = (userData.totalProfit || 0) + cyclePnl;
+
+        batch.update(userDoc.ref, {
+          [balanceField]: newBalance,
+          totalProfit: newTotalProfit,
+          lastTradeAt: now,
+          activePairChange24h: pair24hChange,
+          marketDataSource: "coingecko_live",
+          engineStatus: "TRADING",
+        });
+
+        if (cyclePnl > 0.000001) {
+          const tradeRef = db.collection("trades").doc();
+          batch.set(tradeRef, {
+            uid: userData.uid,
+            pair: activePair,
+            type: "BUY",
+            amount: cyclePnl,
+            asset: tradingAsset,
+            price: prices.bitcoin?.usd ?? 65000,
+            pnl: cyclePnl,
+            strategy,
+            pair24hChange,
+            dataSource: "coingecko_live",
+            timestamp: now,
+            duration: 5,
+          });
+        }
       }
     }
 
     await batch.commit();
-    console.log(`✅ Trade cycle complete. Data source: CoinGecko live.`);
+    profitCycleCount += cycleProfit;
+    pausedCycleCount += cyclePaused;
+
+    if (cyclePaused > 0 && cycleProfit === 0) {
+      console.log(`🛡️  Stop-Loss ACTIVE — All ${cyclePaused} session(s) protected. Market down.`);
+    } else if (cyclePaused > 0) {
+      console.log(`✅ Cycle: ${cycleProfit} profiting, ${cyclePaused} protected. CoinGecko live.`);
+    } else {
+      console.log(`✅ Cycle complete. ${cycleProfit} session(s) profiting. CoinGecko live.`);
+    }
   } catch (error: any) {
     console.error("Trading loop error:", error.message);
     if (error.code === 7) {
