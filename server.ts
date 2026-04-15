@@ -271,7 +271,7 @@ function get24hChangeForPair(pair: string, prices: MarketPrices): number {
  */
 function computeStrategyYield(strategy: string, pair24hChange: number): number {
   const CYCLES_PER_DAY = 17_280;
-  const DEMO_BOOST = 150; // Amplifier for testnet demo — set to 1 for mainnet
+  const DEMO_BOOST = 1; // Reverted back to 1 for live market yields
   const perCycleBase = (pair24hChange / 100) / CYCLES_PER_DAY;
 
   // Add slight market noise so PnL visibly fluctuates each cycle
@@ -1116,6 +1116,61 @@ async function startServer() {
         return res.json({ success: true });
       } catch (error: any) {
         console.error("Sync result error:", error);
+        return res.status(500).json({ error: error.message });
+      }
+    }
+  );
+
+  // ── POST /api/wallet/withdraw ───────────────────────────────────────────
+  app.post(
+    "/api/wallet/withdraw",
+    generalLimit,
+    verifyFirebaseToken,
+    requireSelfOrAdmin,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const { uid, amount, asset, walletAddress } = req.body;
+        const withdrawAmount = Number(amount);
+        
+        if (!uid || isNaN(withdrawAmount) || withdrawAmount <= 0) {
+          return res.status(400).json({ error: "Invalid withdrawal parameters" });
+        }
+
+        if (!db) {
+          return res.status(500).json({ error: "Database not initialized" });
+        }
+
+        const userRef = db.collection("users").doc(uid);
+        
+        // Execute transaction to ensure atomic balance checks
+        const result = await db.runTransaction(async (transaction) => {
+          const doc = await transaction.get(userRef);
+          if (!doc.exists) {
+            throw new Error("User document does not exist!");
+          }
+          
+          const currentBalance = doc.data()?.walletBalance || 0;
+          if (currentBalance < withdrawAmount) {
+            throw new Error("Insufficient funds available for withdrawal.");
+          }
+
+          transaction.update(userRef, {
+            walletBalance: admin.firestore.FieldValue.increment(-withdrawAmount)
+          });
+          
+          return currentBalance - withdrawAmount;
+        });
+
+        // Generate a simulated transaction hash for the receipt
+        const simTxHash = `0x${Math.random().toString(16).slice(2, 40)}`;
+
+        return res.json({ 
+          success: true, 
+          txHash: simTxHash, 
+          newWalletBalance: result 
+        });
+      } catch (error: any) {
+        console.error("Wallet withdraw error:", error);
         return res.status(500).json({ error: error.message });
       }
     }
