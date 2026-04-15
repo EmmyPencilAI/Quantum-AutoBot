@@ -271,7 +271,7 @@ function get24hChangeForPair(pair: string, prices: MarketPrices): number {
  */
 function computeStrategyYield(strategy: string, pair24hChange: number): number {
   const CYCLES_PER_DAY = 17_280;
-  const DEMO_BOOST = 1; // Reverted back to 1 for live market yields
+  const DEMO_BOOST = 150; // Amplifier for testnet demo — set to 1 for mainnet
   const perCycleBase = (pair24hChange / 100) / CYCLES_PER_DAY;
 
   // Add slight market noise so PnL visibly fluctuates each cycle

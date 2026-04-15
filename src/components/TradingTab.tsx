@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2, ArrowDownLeft, DollarSign, Wallet } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, Cell, ReferenceDot, Label, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc, getDoc } from "firebase/firestore";
 import { buildTransferOnChainPTB, buildStartSessionPTB, buildWithdrawSessionPTB, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
@@ -72,7 +72,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         value: doc.data().pnl
       })).reverse();
       
-      setHistory(userTrades.length > 0 ? userTrades : [{ time: "Start", value: 0 }]);
+      setHistory(userTrades.length > 0 ? userTrades : [{ time: "Start", value: 0, isMarker: false }]);
       setGlobalActivity(userTrades.slice(0, 50));
     }, (error) => {
       console.error("Error fetching trade history:", error);
@@ -222,6 +222,23 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       } else {
         toast.success(`Trade closed. $${totalReturn.toFixed(2)} returned to wallet.`, { id: "stop" });
       }
+
+      // Add Trade Session End marker to database natively
+      if (currentInvestment > 0) {
+        await setDoc(doc(collection(db, "trades")), {
+          uid: user.uid,
+          pair: selectedPair,
+          type: "SESSION_END",
+          amount: Math.abs(actualProfit),
+          asset: asset,
+          pnl: actualProfit,
+          strategy: strategy,
+          timestamp: new Date().toISOString(),
+          isMarker: true,
+          markerLabel: actualProfit >= 0 ? `+${actualProfit.toFixed(2)}` : `${actualProfit.toFixed(2)}`
+        });
+      }
+      
     } catch (e: any) {
       console.error("Stop trading failed:", e);
       toast.error("Failed to stop: " + (e.message || "Unknown error"), { id: "stop" });
@@ -494,30 +511,59 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
             <div className="h-40 md:h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={history}>
-                  <defs>
-                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={pnl >= 0 ? "#4ade80" : "#f87171"} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={pnl >= 0 ? "#4ade80" : "#f87171"} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
+                <BarChart data={history} margin={{ top: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
                   <XAxis dataKey="time" hide />
                   <YAxis hide domain={["auto", "auto"]} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: "#0a0a0a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "12px" }}
-                    itemStyle={{ color: pnl >= 0 ? "#4ade80" : "#f87171" }}
+                    contentStyle={{ backgroundColor: "#0a0a0a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "12px", zIndex: 10 }}
+                    cursor={{ fill: "rgba(255,255,255,0.05)" }}
+                    formatter={(value: any) => {
+                      const num = Number(value);
+                      return [<span style={{ color: num >= 0 ? "#4ade80" : "#f87171" }}>{num >= 0 ? `+${num.toFixed(4)}` : num.toFixed(4)}</span>, "PnL"];
+                    }}
                   />
-                  <Area
-                    type="monotone"
-                    dataKey="value"
-                    stroke={pnl >= 0 ? "#4ade80" : "#f87171"}
-                    strokeWidth={3}
-                    fillOpacity={1}
-                    fill="url(#colorValue)"
-                    animationDuration={500}
-                  />
-                </AreaChart>
+                  
+                  {/* Map ReferenceDots for Session End markers */}
+                  {history.map((entry, index) => {
+                    if (entry.isMarker) {
+                      return (
+                        <ReferenceDot 
+                          key={`marker-${index}`} 
+                          x={entry.time} 
+                          y={entry.value} 
+                          r={5} 
+                          fill={entry.value >= 0 ? "#4ade80" : "#f87171"} 
+                          stroke="white" 
+                          strokeWidth={2}
+                          isFront={true}
+                        >
+                          <Label 
+                            value={`Exit: ${entry.markerLabel}`} 
+                            position="top" 
+                            fill="white" 
+                            fontSize={12} 
+                            fontWeight="bold"
+                            style={{ 
+                              textShadow: "0px 2px 4px rgba(0,0,0,0.8)" 
+                            }} 
+                            offset={10} 
+                          />
+                        </ReferenceDot>
+                      );
+                    }
+                    return null;
+                  })}
+
+                  <Bar dataKey="value" radius={[2, 2, 0, 0]} animationDuration={500}>
+                    {history.map((entry, index) => (
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={entry.isMarker ? (entry.value >= 0 ? "#ffffff" : "#ffffff") : (entry.value >= 0 ? "#4ade80" : "#f87171")} 
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
