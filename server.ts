@@ -430,13 +430,14 @@ if (db) {
 // ─── Express Server ───────────────────────────────────────────────────────────
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || "3000", 10);
+  const PORT = parseInt(process.env.PORT || "5173", 10);
 
   // --- CORS: Restrict to known origins ---
   const allowedOrigins = [
     "http://localhost:3000",
     "http://localhost:5173",
     "https://quantum-auto-bot.vercel.app",
+    "https://quantum-autobot.pxxl.click",
     ...(process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ?? []),
   ];
 
@@ -1230,16 +1231,20 @@ async function startServer() {
   // It was an unauthenticated endpoint that could reset ALL user balances.
 
   // ── Vite Dev / Production Static ──────────────────────────────────────────
-  if (process.env.NODE_ENV !== "production") {
+  const distPath = path.join(process.cwd(), "dist");
+  const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(distPath);
+  
+  if (isProduction && fs.existsSync(distPath)) {
+    console.log("📦 Serving production build from dist/");
+    app.use(express.static(distPath));
+    app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
+  } else {
+    console.log("🔧 Starting Vite dev server...");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
   }
 
   app.listen(PORT, "0.0.0.0", () => {

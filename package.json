@@ -3,10 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "server.ts",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "node prebuild.mjs && vite build",
-    "start": "node prebuild.mjs && NODE_ENV=production npx tsx server.ts",
+    "start": "node prebuild.mjs && tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
