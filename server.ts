@@ -67,6 +67,29 @@ const __dirname = path.dirname(__filename);
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
 let db: admin.firestore.Firestore | null = null;
 
+// Support credentials via environment variable (for remote deployment on pxxl.app, Render, etc.)
+// If GOOGLE_CREDENTIALS_JSON is set, write it to a temp file and point GOOGLE_APPLICATION_CREDENTIALS to it
+if (process.env.GOOGLE_CREDENTIALS_JSON && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  try {
+    const credPath = path.join(process.cwd(), ".gcp-credentials.json");
+    fs.writeFileSync(credPath, process.env.GOOGLE_CREDENTIALS_JSON);
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
+    console.log("✅ Credentials loaded from GOOGLE_CREDENTIALS_JSON env var");
+  } catch (e: any) {
+    console.error("Failed to write credentials from env var:", e.message);
+  }
+}
+
+// Support firebase config via environment variable (since firebase-applet-config.json is gitignored)
+if (process.env.FIREBASE_CONFIG && !fs.existsSync(firebaseConfigPath)) {
+  try {
+    fs.writeFileSync(firebaseConfigPath, process.env.FIREBASE_CONFIG);
+    console.log("✅ Firebase config loaded from FIREBASE_CONFIG env var");
+  } catch (e: any) {
+    console.error("Failed to write firebase config from env var:", e.message);
+  }
+}
+
 if (fs.existsSync(firebaseConfigPath)) {
   try {
     const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
@@ -407,7 +430,7 @@ if (db) {
 // ─── Express Server ───────────────────────────────────────────────────────────
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || "3000", 10);
 
   // --- CORS: Restrict to known origins ---
   const allowedOrigins = [

@@ -11,6 +11,7 @@ coverage/
 # Inject these values via environment variables in CI/CD and production
 firebase-applet-config.json
 firebase-service-account.json
+.gcp-credentials.json
 
 # One-off migration / fix scripts — should not be in version control
 fix_trading.mjs
