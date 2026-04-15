@@ -522,13 +522,33 @@ async function startServer() {
         return res.status(400).json({ error: "Invalid request: uid, amount (>0), and walletAddress are required" });
       }
 
+      const userRef = db.collection("users").doc(uid);
+
       if (!process.env.SUI_PRIVATE_KEY) {
-        return res.status(503).json({
-          error: "On-chain withdrawals are currently unavailable. Treasury not configured.",
-        });
+        // No treasury key — fallback to Firestore-only balance deduction (testnet mode)
+        try {
+          const newBalance = await db.runTransaction(async (t) => {
+            const snap = await t.get(userRef);
+            if (!snap.exists) throw new Error("User not found");
+            const currentBalance = snap.data()!.walletBalance || 0;
+            if (amountNum > currentBalance) {
+              throw new Error(`Insufficient balance. Available: ${currentBalance.toFixed(2)}`);
+            }
+            const updated = currentBalance - amountNum;
+            t.update(userRef, { walletBalance: updated });
+            return updated;
+          });
+          return res.json({
+            success: true,
+            txHash: `testnet_${Date.now().toString(16)}`,
+            newWalletBalance: newBalance,
+            note: "Testnet withdrawal — balance deducted from Firestore. No on-chain transfer.",
+          });
+        } catch (e: any) {
+          return res.status(400).json({ error: e.message });
+        }
       }
 
-      const userRef = db.collection("users").doc(uid);
       let newWalletBalance: number;
 
       // ── ATOMIC balance deduction (fixes TOCTOU race condition) ──
@@ -1157,60 +1177,6 @@ async function startServer() {
     }
   );
 
-  // ── POST /api/wallet/withdraw ───────────────────────────────────────────
-  app.post(
-    "/api/wallet/withdraw",
-    generalLimit,
-    verifyFirebaseToken,
-    requireSelfOrAdmin,
-    async (req: AuthRequest, res: Response) => {
-      try {
-        const { uid, amount, asset, walletAddress } = req.body;
-        const withdrawAmount = Number(amount);
-        
-        if (!uid || isNaN(withdrawAmount) || withdrawAmount <= 0) {
-          return res.status(400).json({ error: "Invalid withdrawal parameters" });
-        }
-
-        if (!db) {
-          return res.status(500).json({ error: "Database not initialized" });
-        }
-
-        const userRef = db.collection("users").doc(uid);
-        
-        // Execute transaction to ensure atomic balance checks
-        const result = await db.runTransaction(async (transaction) => {
-          const doc = await transaction.get(userRef);
-          if (!doc.exists) {
-            throw new Error("User document does not exist!");
-          }
-          
-          const currentBalance = doc.data()?.walletBalance || 0;
-          if (currentBalance < withdrawAmount) {
-            throw new Error("Insufficient funds available for withdrawal.");
-          }
-
-          transaction.update(userRef, {
-            walletBalance: admin.firestore.FieldValue.increment(-withdrawAmount)
-          });
-          
-          return currentBalance - withdrawAmount;
-        });
-
-        // Generate a simulated transaction hash for the receipt
-        const simTxHash = `0x${Math.random().toString(16).slice(2, 40)}`;
-
-        return res.json({ 
-          success: true, 
-          txHash: simTxHash, 
-          newWalletBalance: result 
-        });
-      } catch (error: any) {
-        console.error("Wallet withdraw error:", error);
-        return res.status(500).json({ error: error.message });
-      }
-    }
-  );
 
   // ── POST /api/trading/simulate ────────────────────────────────────────────
   app.post("/api/trading/simulate", generalLimit, async (req: Request, res: Response) => {
