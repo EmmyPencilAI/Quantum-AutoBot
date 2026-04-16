@@ -109,7 +109,7 @@ if (fs.existsSync(firebaseConfigPath)) {
         try {
           admin.initializeApp({ projectId: firebaseConfig.projectId });
           console.log(`Firebase Admin initialized with projectId: ${firebaseConfig.projectId}`);
-          console.warn("WARNING: No FIREBASE_SERVICE_ACCOUNT env var set. Firebase Admin may fail on production.");
+          console.warn("WARNING: No GOOGLE_CREDENTIALS_JSON env var set. Firebase Admin may fail on production.");
         } catch (e) {
           console.error("Firebase Admin initialization failed:", e);
         }
@@ -395,7 +395,8 @@ async function processBackgroundTrades() {
         totalProfit: newTotalProfit,
         lastTradeAt: now,
         currentTrend: currentTrend,
-        currentLotSize: currentLotSize
+        currentLotSize: currentLotSize,
+        tradeCount: (userData.tradeCount || 0) + 1
       });
       
       // Trade Frequency: Targeting ~1,500 trades daily
