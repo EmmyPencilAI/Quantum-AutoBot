@@ -109,7 +109,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       toast.loading("Settling trades...", { id: "settle" });
       const address = deriveSuiWallet(user.uid).toSuiAddress();
       const idToken = await user.getIdToken();
-      const response = await fetch("/api/trading/settle", {
+      const API_BASE = import.meta.env.VITE_API_URL || "";
+      const response = await fetch(`${API_BASE}/api/trading/settle`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -274,7 +275,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     try {
       const address = deriveSuiWallet(user.uid).toSuiAddress();
       const idToken = await user.getIdToken();
-      const response = await fetch("/api/trading/withdraw-profit", {
+      const API_BASE = import.meta.env.VITE_API_URL || "";
+      const response = await fetch(`${API_BASE}/api/trading/withdraw-profit`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -315,7 +317,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
       const idToken = await user.getIdToken();
-      const response = await fetch("/api/wallet/withdraw", {
+      const API_BASE = import.meta.env.VITE_API_URL || "";
+      const response = await fetch(`${API_BASE}/api/wallet/withdraw`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
         body: JSON.stringify({ uid: user.uid, amount, asset: withdrawAsset, walletAddress: withdrawAddress })

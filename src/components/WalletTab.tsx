@@ -267,7 +267,8 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
       const idToken = await user.getIdToken();
-      const response = await fetch("/api/wallet/withdraw", {
+      const API_BASE = import.meta.env.VITE_API_URL || "";
+      const response = await fetch(`${API_BASE}/api/wallet/withdraw`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",

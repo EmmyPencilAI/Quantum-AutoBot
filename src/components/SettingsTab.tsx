@@ -52,7 +52,8 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ user }) => {
   const checkSystemStatus = async () => {
     setCheckingStatus(true);
     try {
-      const response = await fetch("/api/admin/status");
+      const API_BASE = import.meta.env.VITE_API_URL || "";
+      const response = await fetch(`${API_BASE}/api/admin/status`);
       const data = await response.json();
       setSystemStatus(data);
     } catch (e) {

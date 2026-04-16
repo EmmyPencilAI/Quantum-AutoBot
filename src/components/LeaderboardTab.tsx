@@ -14,7 +14,8 @@ const LeaderboardTab: React.FC<LeaderboardTabProps> = ({ user }) => {
   useEffect(() => {
     const fetchLeaderboard = async () => {
       try {
-        const response = await fetch("/api/leaderboard");
+        const API_BASE = import.meta.env.VITE_API_URL || "";
+        const response = await fetch(`${API_BASE}/api/leaderboard`);
         const data = await response.json();
         setTraders(data);
         
