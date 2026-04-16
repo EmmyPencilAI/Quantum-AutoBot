@@ -32,6 +32,7 @@ const suiClient = new SuiClient({ url: getFullnodeUrl("testnet"), network: "test
 // Load Firebase Config
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
 let db: any = null;
+let isQuotaExceeded = false;
 
 if (fs.existsSync(firebaseConfigPath)) {
   try {
@@ -65,29 +66,33 @@ if (fs.existsSync(firebaseConfigPath)) {
       console.log(`Attempting to connect to Firestore Database: ${finalDbId}`);
       
       db = getFirestore(adminApp, finalDbId);
-      // Test the connection immediately with a write operation
-      await db.collection("health_check").doc("ping").set({ 
-        lastPing: new Date().toISOString(),
-        projectId: firebaseConfig.projectId,
-        databaseId: finalDbId
-      });
-      console.log(`Firebase Admin connected successfully to database: ${finalDbId}`);
-    } catch (e: any) {
-      console.error(`Failed to connect to database ${dbId}, falling back to (default):`, e.message);
+      // Test the connection immediately
       try {
-        db = getFirestore(adminApp, "(default)");
         await db.collection("health_check").doc("ping").set({ 
           lastPing: new Date().toISOString(),
           projectId: firebaseConfig.projectId,
-          databaseId: "(default)"
+          databaseId: finalDbId
         });
-        console.log("Firebase Admin connected successfully to (default) database");
-      } catch (e2: any) {
-        console.error("Critical: Failed to connect to both named and (default) databases:", e2.message);
-        // If both fail, we still set db to (default) to allow the app to try, 
-        // but we log the failure clearly.
-        db = getFirestore(adminApp, "(default)");
+        console.log(`Firebase Admin connected successfully to database: ${finalDbId}`);
+      } catch (pingError: any) {
+        if (pingError.code === 8 || pingError.message?.includes("RESOURCE_EXHAUSTED") || pingError.message?.includes("Quota exceeded")) {
+          console.error(`⚠️ WARNING: Quota Exceeded (RESOURCE_EXHAUSTED) on database ${finalDbId}. Database connection is established but operations will fail until quota resets.`);
+          isQuotaExceeded = true;
+        } else if (pingError.code === 5 || pingError.message?.includes("NOT_FOUND")) {
+          console.error(`Failed to connect to database ${finalDbId} (NOT_FOUND), falling back to (default)`);
+          db = getFirestore(adminApp, "(default)");
+          await db.collection("health_check").doc("ping").set({ 
+            lastPing: new Date().toISOString(),
+            projectId: firebaseConfig.projectId,
+            databaseId: "(default)"
+          }).catch((e2: any) => console.error("Critical: Failed to connect to both named and (default) databases:", e2.message));
+          console.log("Firebase Admin connected successfully to (default) database");
+        } else {
+          throw pingError;
+        }
       }
+    } catch (e: any) {
+      console.error(`Unexpected Database Initialization Error:`, e.message);
     }
     
     console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
@@ -250,7 +255,7 @@ if (db) {
 
 // Background Trading Engine
 async function processBackgroundTrades() {
-  if (!db) return;
+  if (!db || isQuotaExceeded) return;
   
   try {
     const usersRef = db.collection("users");
@@ -392,18 +397,21 @@ async function processBackgroundTrades() {
     await batch.commit();
     console.log(`Background trades processed successfully for ${tradingUsers.size} users`);
   } catch (error: any) {
-    console.error("Error in background trading loop:", error.message || error);
     if (error.code === 7 || error.message?.includes("PERMISSION_DENIED")) {
       console.error("CRITICAL: Permission denied in background trading loop. Check Firebase Admin credentials and project permissions.");
+    } else if (error.code === 8 || error.message?.includes("RESOURCE_EXHAUSTED")) {
+       console.error("⚠️ Quota Exceeded in background trading loop. Waiting for quota reset.");
     } else if (error.code === 5 || error.message?.includes("NOT_FOUND")) {
       console.warn("Firestore collection not found or initialized yet. Skipping background trades.");
+    } else {
+      console.error("Error in background trading loop:", error.message || error);
     }
   }
 }
 
-// Run background trading every 5 seconds for real-time feel
+// Run background trading every 15 seconds to prevent quota exhaustion
 if (db) {
-  setInterval(processBackgroundTrades, 5000);
+  setInterval(processBackgroundTrades, 15000);
 }
 
 // Sui Config (Mirroring src/lib/sui.ts)

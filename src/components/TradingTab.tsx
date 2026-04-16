@@ -5,6 +5,7 @@ import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Respons
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
 import { deriveSuiWallet, transferOnChain, startSessionOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
+import { apiFetch } from "../lib/api";
 
 import { toast } from "sonner";
 
@@ -101,23 +102,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         // Settlement logic
         toast.loading("Settling trades on-chain...", { id: "settle" });
         const address = deriveSuiWallet(user.uid).toSuiAddress();
-        const response = await fetch("/api/trading/settle", {
+        const result = await apiFetch<{ success: boolean; error?: string }>("/api/trading/settle", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ uid: user.uid, walletAddress: address })
         });
-        if (!response.ok) {
-          const text = await response.text();
-          console.error("Settlement API error:", text);
-          try {
-            const errorData = JSON.parse(text);
-            throw new Error(errorData.error || `Server error: ${response.status}`);
-          } catch (e) {
-            throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
-          }
-        }
-
-        const result = await response.json();
+        
         if (result.success) {
           console.log("Settlement successful:", result);
           toast.success("Settlement successful! Funds returned to wallet.", { id: "settle" });
@@ -168,9 +157,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     toast.loading("Processing withdrawal...", { id: "withdraw" });
 
     try {
-      const response = await fetch("/api/wallet/withdraw", {
+      const result = await apiFetch<{ success: boolean; error?: string }>("/api/wallet/withdraw", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           uid: user.uid,
           amount,
@@ -179,12 +167,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         })
       });
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Server error (${response.status}): ${text}`);
-      }
-
-      const result = await response.json();
       if (result.success) {
         toast.success("Withdrawal successful!", { id: "withdraw" });
         setShowWithdrawModal(false);
@@ -329,18 +311,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     toast.loading("Withdrawing profit to wallet balance...", { id: "withdraw-profit" });
     try {
       const address = deriveSuiWallet(user.uid).toSuiAddress();
-      const response = await fetch("/api/trading/withdraw-profit", {
+      const result = await apiFetch<{ success: boolean; error?: string; withdrawn: number }>("/api/trading/withdraw-profit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ uid: user.uid, walletAddress: address })
       });
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Server error (${response.status}): ${text}`);
-      }
-
-      const result = await response.json();
       if (result.success) {
         toast.success(`Successfully withdrawn ${result.withdrawn.toFixed(2)} to wallet balance!`, { id: "withdraw-profit" });
       } else {
