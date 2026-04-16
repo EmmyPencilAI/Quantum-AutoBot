@@ -407,6 +407,11 @@ async function startServer() {
     next();
   });
 
+  // Health check endpoint to verify API is running
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString(), dbConnected: !!db });
+  });
+
   // Wallet Withdrawal Endpoint
   app.post("/api/wallet/withdraw", async (req, res) => {
     if (!db) return res.status(500).json({ error: "Database not initialized" });
@@ -1172,18 +1177,26 @@ async function startServer() {
     ];
   }
 
-  // Production static file serving
+  // Production static file serving - MUST be AFTER all API routes
   if (process.env.NODE_ENV === "production") {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
+    // Only serve index.html for non-API GET requests (SPA fallback)
     app.get("*", (req, res) => {
+      if (req.url.startsWith('/api')) {
+        return res.status(404).json({ error: "API endpoint not found" });
+      }
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Quantum Finance Server running on http://localhost:${PORT}`);
+    console.log(`API routes registered. NODE_ENV=${process.env.NODE_ENV}`);
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("FATAL: Server failed to start:", err);
+  process.exit(1);
+});

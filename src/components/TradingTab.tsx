@@ -106,15 +106,16 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ uid: user.uid, walletAddress: address })
         });
+        
+        // Check if response is JSON before parsing
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          throw new Error("Server returned non-JSON response. API may be unavailable. Please try again.");
+        }
+
         if (!response.ok) {
-          const text = await response.text();
-          console.error("Settlement API error:", text);
-          try {
-            const errorData = JSON.parse(text);
-            throw new Error(errorData.error || `Server error: ${response.status}`);
-          } catch (e) {
-            throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
-          }
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Server error: ${response.status}`);
         }
 
         const result = await response.json();
