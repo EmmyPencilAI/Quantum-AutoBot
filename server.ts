@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from "express";
+import express from "express";
 import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -32,7 +32,6 @@ const suiClient = new SuiClient({ url: getFullnodeUrl("testnet"), network: "test
 // Load Firebase Config
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
 let db: any = null;
-let isQuotaExceeded = false;
 
 if (fs.existsSync(firebaseConfigPath)) {
   try {
@@ -58,41 +57,43 @@ if (fs.existsSync(firebaseConfigPath)) {
     
     const adminApp = admin.app();
     // Use the named database if provided, otherwise default
-    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+    const dbId = firebaseConfig.firestoreDatabaseId || "";
     
+    const tryConnect = async (targetDbId: string | undefined) => {
+      const displayId = targetDbId || "(default)";
+      console.log(`Attempting to connect to Firestore Database: ${displayId}`);
+      const testDb = getFirestore(adminApp, targetDbId);
+      await testDb.collection("health_check").doc("ping").set({ 
+        lastPing: new Date().toISOString(),
+        projectId: firebaseConfig.projectId,
+        databaseId: displayId
+      });
+      return testDb;
+    };
+
     try {
-      // Explicitly check if dbId is a placeholder or empty
-      const finalDbId = (!dbId || dbId.includes("TODO") || dbId === "") ? "(default)" : dbId;
-      console.log(`Attempting to connect to Firestore Database: ${finalDbId}`);
-      
-      db = getFirestore(adminApp, finalDbId);
-      // Test the connection immediately
+      // 1. Try the one from config if it looks valid
+      const initialDbId = (!dbId || dbId.includes("TODO") || dbId === "") ? undefined : dbId;
+      db = await tryConnect(initialDbId);
+      console.log(`Firebase Admin connected successfully to database: ${initialDbId || "(default)"}`);
+    } catch (e: any) {
+      console.error(`Failed to connect to initial database ${dbId || "(default)"}:`, e.message);
       try {
-        await db.collection("health_check").doc("ping").set({ 
-          lastPing: new Date().toISOString(),
-          projectId: firebaseConfig.projectId,
-          databaseId: finalDbId
-        });
-        console.log(`Firebase Admin connected successfully to database: ${finalDbId}`);
-      } catch (pingError: any) {
-        if (pingError.code === 8 || pingError.message?.includes("RESOURCE_EXHAUSTED") || pingError.message?.includes("Quota exceeded")) {
-          console.error(`⚠️ WARNING: Quota Exceeded (RESOURCE_EXHAUSTED) on database ${finalDbId}. Database connection is established but operations will fail until quota resets.`);
-          isQuotaExceeded = true;
-        } else if (pingError.code === 5 || pingError.message?.includes("NOT_FOUND")) {
-          console.error(`Failed to connect to database ${finalDbId} (NOT_FOUND), falling back to (default)`);
-          db = getFirestore(adminApp, "(default)");
-          await db.collection("health_check").doc("ping").set({ 
-            lastPing: new Date().toISOString(),
-            projectId: firebaseConfig.projectId,
-            databaseId: "(default)"
-          }).catch((e2: any) => console.error("Critical: Failed to connect to both named and (default) databases:", e2.message));
-          console.log("Firebase Admin connected successfully to (default) database");
-        } else {
-          throw pingError;
+        // 2. Try explicit (default)
+        db = await tryConnect("(default)");
+        console.log("Firebase Admin connected successfully to (default) database");
+      } catch (e2: any) {
+        console.error("Failed to connect to (default) database:", e2.message);
+        try {
+          // 3. Try undefined (which should be the same as default but sometimes behaves differently in SDK)
+          db = await tryConnect(undefined);
+          console.log("Firebase Admin connected successfully to undefined (default) database");
+        } catch (e3: any) {
+          console.error("Critical: Failed to connect to any Firestore database:", e3.message);
+          // Ultimate fallback to allow the object to exist even if it fails later
+          db = getFirestore(adminApp);
         }
       }
-    } catch (e: any) {
-      console.error(`Unexpected Database Initialization Error:`, e.message);
     }
     
     console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
@@ -101,81 +102,8 @@ if (fs.existsSync(firebaseConfigPath)) {
   }
 }
 
-// Support credentials via environment variable (for Render deployment)
-if (process.env.GOOGLE_CREDENTIALS_JSON && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-  try {
-    const credPath = path.join(process.cwd(), ".gcp-credentials.json");
-    fs.writeFileSync(credPath, process.env.GOOGLE_CREDENTIALS_JSON);
-    process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
-    console.log("✅ Credentials loaded from GOOGLE_CREDENTIALS_JSON env var");
-  } catch (e: any) {
-    console.error("Failed to write credentials from env var:", e.message);
-  }
-}
-
-// Support firebase config via environment variable
-if (process.env.FIREBASE_CONFIG && !fs.existsSync(firebaseConfigPath)) {
-  try {
-    fs.writeFileSync(firebaseConfigPath, process.env.FIREBASE_CONFIG);
-    console.log("✅ Firebase config loaded from FIREBASE_CONFIG env var");
-  } catch (e: any) {
-    console.error("Failed to write firebase config from env var:", e.message);
-  }
-}
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// ─── Auth Middleware ──────────────────────────────────────────────────────────
-interface AuthRequest extends Request {
-  uid?: string;
-  userEmail?: string;
-  isAdmin?: boolean;
-}
-
-async function verifyFirebaseToken(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    res.status(401).json({ error: "Unauthorized: Missing or invalid Authorization header" });
-    return;
-  }
-  const idToken = authHeader.split("Bearer ")[1];
-  try {
-    const decoded = await admin.auth().verifyIdToken(idToken);
-    req.uid = decoded.uid;
-    req.userEmail = decoded.email;
-    req.isAdmin =
-      decoded.role === "admin" ||
-      (!!process.env.ADMIN_EMAIL &&
-        decoded.email === process.env.ADMIN_EMAIL &&
-        decoded.email_verified === true);
-    next();
-  } catch (error: any) {
-    console.error("Token verification failed:", error.code || error.message);
-    res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
-  }
-}
-
-function requireSelfOrAdmin(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-): void {
-  const requestedUid = req.body?.uid || req.params?.uid;
-  if (!requestedUid) {
-    res.status(400).json({ error: "Missing uid in request" });
-    return;
-  }
-  if (req.uid !== requestedUid && !req.isAdmin) {
-    res.status(403).json({ error: "Forbidden: You can only access your own resources" });
-    return;
-  }
-  next();
-}
 
 // Community Bot Logic
 const BOT_MESSAGES = [
@@ -255,7 +183,7 @@ if (db) {
 
 // Background Trading Engine
 async function processBackgroundTrades() {
-  if (!db || isQuotaExceeded) return;
+  if (!db) return;
   
   try {
     const usersRef = db.collection("users");
@@ -318,29 +246,20 @@ async function processBackgroundTrades() {
       const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
       const currentAssetBalance = userData[balanceField] || 0;
 
-      const currentPrice = 65000 + (Math.random() * 1000 - 500);
-      const currentLeverage = userData.leverage || 100;
-      
-      // Forex Lot Size Logic
-      // 1 Standard Lot = 100,000 base units
-      // Position Value = Margin (Balance) * Leverage
-      let currentLotSize = (currentAssetBalance * currentLeverage) / 100000;
-      if (currentLotSize < 0.01) currentLotSize = 0.01; // Minimum lot size ceiling
+      // Lot Size Logic: Start at 0.05 and grow overtime
+      let currentLotSize = userData.currentLotSize || 0.05;
+      // Grow lot size by 0.1% every update while trading
+      currentLotSize = Math.min(10.0, currentLotSize + (currentLotSize * 0.001));
 
-      // Randomize win based on AI strategy
+      // Randomize profit based on win rate
+      let actualProfit = 0;
       const isWin = Math.random() < winRate;
       
-      // Simulate realistic price movement (10 to 60 "pips/points")
-      const pointsMoved = (Math.random() * 50) + 10;
-      
-      // PNL = Points * LotSize * StrategyMultiplier
-      const rawProfit = pointsMoved * currentLotSize * (profitFactor * 150); 
-      
-      let actualProfit = 0;
       if (isWin) {
-        actualProfit = rawProfit;
+        actualProfit = currentAssetBalance * profitFactor * (0.8 + Math.random() * 0.4);
       } else {
-        actualProfit = -(rawProfit * 0.6); // mitigate catastrophic simulated loss
+        // Loss is usually smaller than profit for these strategies
+        actualProfit = -currentAssetBalance * (profitFactor * 0.5) * (0.5 + Math.random() * 0.5);
       }
       
       const newBalance = currentAssetBalance + actualProfit;
@@ -367,8 +286,8 @@ async function processBackgroundTrades() {
       
       if (Math.random() < tradeProbability) {
         const tradeRef = db.collection("trades").doc();
-        // Trade amount is Position Value
-        const tradeAmount = currentAssetBalance * currentLeverage; 
+        // Trade amount influenced by lot size
+        const tradeAmount = currentLotSize * 1000; 
         
         const tradeType = currentTrend === "Long" ? "BUY" : "SELL";
         
@@ -379,7 +298,7 @@ async function processBackgroundTrades() {
           amount: tradeAmount,
           lotSize: currentLotSize,
           asset: tradingAsset,
-          price: currentPrice,
+          price: 65000 + (Math.random() * 1000 - 500),
           pnl: actualProfit,
           duration: Math.floor(Math.random() * 60) + 10,
           timestamp: now,
@@ -406,21 +325,18 @@ async function processBackgroundTrades() {
     await batch.commit();
     console.log(`Background trades processed successfully for ${tradingUsers.size} users`);
   } catch (error: any) {
+    console.error("Error in background trading loop:", error.message || error);
     if (error.code === 7 || error.message?.includes("PERMISSION_DENIED")) {
       console.error("CRITICAL: Permission denied in background trading loop. Check Firebase Admin credentials and project permissions.");
-    } else if (error.code === 8 || error.message?.includes("RESOURCE_EXHAUSTED")) {
-       console.error("⚠️ Quota Exceeded in background trading loop. Waiting for quota reset.");
     } else if (error.code === 5 || error.message?.includes("NOT_FOUND")) {
       console.warn("Firestore collection not found or initialized yet. Skipping background trades.");
-    } else {
-      console.error("Error in background trading loop:", error.message || error);
     }
   }
 }
 
-// Run background trading every 15 seconds to prevent quota exhaustion
+// Run background trading every 5 seconds for real-time feel
 if (db) {
-  setInterval(processBackgroundTrades, 15000);
+  setInterval(processBackgroundTrades, 5000);
 }
 
 // Sui Config (Mirroring src/lib/sui.ts)
@@ -460,10 +376,30 @@ async function getDecimals(coinType: string): Promise<number> {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
   app.use(cors());
   app.use(express.json());
+
+  // Vite middleware for development - Move to TOP but skip for /api
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { 
+        middlewareMode: true,
+        fs: {
+          allow: [process.cwd()]
+        }
+      },
+      appType: "spa",
+    });
+    
+    app.use((req, res, next) => {
+      if (req.url.startsWith('/api')) {
+        return next();
+      }
+      vite.middlewares(req, res, next);
+    });
+  }
 
   // Global request logger for debugging 404s
   app.use((req, res, next) => {
@@ -471,8 +407,8 @@ async function startServer() {
     next();
   });
 
-  // Wallet Withdrawal Endpoint (Auth Protected)
-  app.post("/api/wallet/withdraw", verifyFirebaseToken, requireSelfOrAdmin, async (req: AuthRequest, res: Response) => {
+  // Wallet Withdrawal Endpoint
+  app.post("/api/wallet/withdraw", async (req, res) => {
     if (!db) return res.status(500).json({ error: "Database not initialized" });
     const { uid, amount, asset, walletAddress } = req.body;
     if (!uid || !amount || !walletAddress) return res.status(400).json({ error: "Invalid request" });
@@ -564,7 +500,7 @@ async function startServer() {
         } catch (e: any) {
           console.error("Real Sui withdrawal failed:", e);
           onChainError = e.message || "Sui blockchain transaction failed";
-          // Don't rollback - allow the DB withdrawal to succeed even if on-chain fails
+          // FIX: Don't rollback - allow the DB withdrawal to succeed even if on-chain fails
           // The on-chain transfer can be retried manually by admin
           console.log(`On-chain failed but DB withdrawal preserved for ${uid}. Amount: ${amount}. Error: ${onChainError}`);
           isSimulated = true; // Mark as simulated since on-chain didn't complete
@@ -609,7 +545,7 @@ async function startServer() {
   });
 
   // Trading Engine Simulation & Settlement
-  app.post("/api/trading/settle", verifyFirebaseToken, requireSelfOrAdmin, async (req: AuthRequest, res: Response) => {
+  app.post("/api/trading/settle", async (req, res) => {
     const { uid, walletAddress } = req.body;
     if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
 
@@ -642,7 +578,6 @@ async function startServer() {
         isTrading: false,
         [balanceField]: 0,
         initialInvestment: 0,
-        totalProfit: 0,
         walletBalance: newWalletBalance,
         lastSettlement: {
           amount: totalToUser,
@@ -782,7 +717,7 @@ async function startServer() {
   });
 
   // Withdraw profit without stopping trade
-  app.post("/api/trading/withdraw-profit", verifyFirebaseToken, requireSelfOrAdmin, async (req: AuthRequest, res: Response) => {
+  app.post("/api/trading/withdraw-profit", async (req, res) => {
     const { uid, walletAddress } = req.body;
     if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
 
@@ -881,7 +816,7 @@ async function startServer() {
   });
 
   // Community Comments
-  app.post("/api/community/comment", verifyFirebaseToken, async (req: AuthRequest, res: Response) => {
+  app.post("/api/community/comment", async (req, res) => {
     console.log("POST /api/community/comment", req.body);
     if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
     try {
@@ -919,7 +854,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/community/like", verifyFirebaseToken, async (req: AuthRequest, res: Response) => {
+  app.post("/api/community/like", async (req, res) => {
     console.log("POST /api/community/like", req.body);
     if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
     try {
@@ -1143,7 +1078,6 @@ async function startServer() {
       };
       
       if (apiKey) {
-        // Try both header and query param for maximum compatibility
         headers['x-cg-demo-api-key'] = apiKey;
       }
       
@@ -1153,7 +1087,6 @@ async function startServer() {
         const text = await response.text();
         console.warn(`CoinGecko API returned status ${response.status}: ${text}`);
         
-        // If unauthorized or rate limited, return a fallback to keep the UI working
         if (response.status === 401 || response.status === 429 || response.status === 403) {
           console.log("Returning fallback price data due to API error");
           return res.json(getFallbackPrices());
@@ -1165,7 +1098,6 @@ async function startServer() {
       res.json(data);
     } catch (error) {
       console.error("Failed to fetch prices:", error);
-      // Always return fallback data instead of 500 to keep the app functional
       res.json(getFallbackPrices());
     }
   });
@@ -1184,21 +1116,8 @@ async function startServer() {
     ];
   }
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      root: process.cwd(),
-      base: "/",
-      server: { 
-        middlewareMode: true,
-        fs: {
-          allow: [process.cwd()]
-        }
-      },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
+  // Production static file serving
+  if (process.env.NODE_ENV === "production") {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
