@@ -80,8 +80,10 @@ if (fs.existsSync(firebaseConfigPath)) {
           if (serviceAccount.type === 'authorized_user') {
             // Admin SDK cert() doesn't support 'authorized_user' (only service_account).
             // We must use Application Default Credentials (ADC) by saving it to a temp file.
-            const tmpPath = require('path').join(require('os').tmpdir(), 'google-credentials.json');
-            require('fs').writeFileSync(tmpPath, JSON.stringify(serviceAccount));
+            // Import os dynamically since we are in an ES module environment
+            const os = await import('os');
+            const tmpPath = path.join(os.tmpdir(), 'google-credentials.json');
+            fs.writeFileSync(tmpPath, JSON.stringify(serviceAccount));
             process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
             
             admin.initializeApp({
