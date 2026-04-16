@@ -43,7 +43,7 @@ if (fs.existsSync(firebaseConfigPath)) {
       
       if (serviceAccountEnv) {
         try {
-          let serviceAccount;
+          let serviceAccount: any;
           let envType = "raw JSON";
           
           try {
@@ -64,6 +64,17 @@ if (fs.existsSync(firebaseConfigPath)) {
                 throw new Error("Invalid service account JSON format.");
               }
             }
+          }
+          
+          // If it parsed as a string (happens with double-escaped JSON), parse it again
+          if (typeof serviceAccount === 'string') {
+            serviceAccount = JSON.parse(serviceAccount);
+            envType = "double-parsed JSON";
+          }
+          
+          // Auto-inject missing project_id if the user's JSON is stripped down
+          if (!serviceAccount.project_id && firebaseConfig.projectId) {
+            serviceAccount.project_id = firebaseConfig.projectId;
           }
           
           admin.initializeApp({
