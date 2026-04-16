@@ -43,21 +43,36 @@ if (fs.existsSync(firebaseConfigPath)) {
       
       if (serviceAccountEnv) {
         try {
-          // FIREBASE_SERVICE_ACCOUNT can be JSON string or base64 encoded
           let serviceAccount;
+          let envType = "raw JSON";
+          
           try {
             serviceAccount = JSON.parse(serviceAccountEnv);
-          } catch {
-            // Try base64 decode
-            serviceAccount = JSON.parse(Buffer.from(serviceAccountEnv, 'base64').toString('utf-8'));
+          } catch (e1) {
+            try {
+              // Sometimes Render adds outer quotes or escapes newlines
+              const sanitized = serviceAccountEnv.replace(/^['"]|['"]$/g, '').replace(/\\n/g, '\n');
+              serviceAccount = JSON.parse(sanitized);
+              envType = "sanitized JSON";
+            } catch (e2) {
+              try {
+                // Try base64
+                serviceAccount = JSON.parse(Buffer.from(serviceAccountEnv, 'base64').toString('utf-8'));
+                envType = "base64 JSON";
+              } catch (e3) {
+                console.error("Could not parse service account JSON. First 20 chars:", serviceAccountEnv.substring(0, 20));
+                throw new Error("Invalid service account JSON format.");
+              }
+            }
           }
+          
           admin.initializeApp({
             credential: admin.credential.cert(serviceAccount),
             projectId: firebaseConfig.projectId,
           });
-          console.log(`Firebase Admin initialized with service account for project: ${firebaseConfig.projectId}`);
-        } catch (e) {
-          console.error("Failed to initialize with FIREBASE_SERVICE_ACCOUNT:", e);
+          console.log(`Firebase Admin initialized successfully with ${envType} for project: ${firebaseConfig.projectId}`);
+        } catch (e: any) {
+          console.error("Failed to initialize with Service Account:", e.message);
           // Fallback to projectId only
           admin.initializeApp({ projectId: firebaseConfig.projectId });
           console.warn("Firebase Admin initialized with projectId only (credentials may fail on Render)");
