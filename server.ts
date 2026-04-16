@@ -38,19 +38,38 @@ if (fs.existsSync(firebaseConfigPath)) {
     const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
     
     if (!admin.apps.length) {
-      try {
-        // Prioritize explicit projectId from config to avoid connecting to the wrong project
-        admin.initializeApp({
-          projectId: firebaseConfig.projectId,
-        });
-        console.log(`Firebase Admin initialized with explicit projectId: ${firebaseConfig.projectId}`);
-      } catch (e) {
-        console.warn("Explicit Firebase Admin initialization failed, trying default:", e);
+      // Check for service account credentials (required for Render/production)
+      const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
+      
+      if (serviceAccountEnv) {
         try {
-          admin.initializeApp();
-          console.log("Firebase Admin initialized with default environment config");
-        } catch (e2) {
-          console.error("Critical: Firebase Admin initialization failed completely:", e2);
+          // FIREBASE_SERVICE_ACCOUNT can be JSON string or base64 encoded
+          let serviceAccount;
+          try {
+            serviceAccount = JSON.parse(serviceAccountEnv);
+          } catch {
+            // Try base64 decode
+            serviceAccount = JSON.parse(Buffer.from(serviceAccountEnv, 'base64').toString('utf-8'));
+          }
+          admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            projectId: firebaseConfig.projectId,
+          });
+          console.log(`Firebase Admin initialized with service account for project: ${firebaseConfig.projectId}`);
+        } catch (e) {
+          console.error("Failed to initialize with FIREBASE_SERVICE_ACCOUNT:", e);
+          // Fallback to projectId only
+          admin.initializeApp({ projectId: firebaseConfig.projectId });
+          console.warn("Firebase Admin initialized with projectId only (credentials may fail on Render)");
+        }
+      } else {
+        // No service account - use projectId only (works locally with gcloud auth)
+        try {
+          admin.initializeApp({ projectId: firebaseConfig.projectId });
+          console.log(`Firebase Admin initialized with projectId: ${firebaseConfig.projectId}`);
+          console.warn("WARNING: No FIREBASE_SERVICE_ACCOUNT env var set. Firebase Admin may fail on production.");
+        } catch (e) {
+          console.error("Firebase Admin initialization failed:", e);
         }
       }
     }
@@ -85,7 +104,7 @@ if (fs.existsSync(firebaseConfigPath)) {
       } catch (e2: any) {
         console.error("Failed to connect to (default) database:", e2.message);
         try {
-          // 3. Try undefined (which should be the same as default but sometimes behaves differently in SDK)
+          // 3. Try undefined
           db = await tryConnect(undefined);
           console.log("Firebase Admin connected successfully to undefined (default) database");
         } catch (e3: any) {
