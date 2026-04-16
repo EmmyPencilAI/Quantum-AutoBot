@@ -626,6 +626,7 @@ async function startServer() {
         isTrading: false,
         [balanceField]: 0,
         initialInvestment: 0,
+        totalProfit: 0,
         walletBalance: newWalletBalance,
         lastSettlement: {
           amount: totalToUser,

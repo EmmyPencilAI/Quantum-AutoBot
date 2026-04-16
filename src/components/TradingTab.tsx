@@ -28,6 +28,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawAddress, setWithdrawAddress] = useState("");
   const [withdrawAsset, setWithdrawAsset] = useState("USDT");
+  const [setupStep, setSetupStep] = useState(1);
+  const [lastSettlement, setLastSettlement] = useState<any>(null);
 
   // Sync with Firestore
   useEffect(() => {
@@ -43,6 +45,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setInitialInvestment(data.initialInvestment || 0);
         setWalletBalance(data.walletBalance || 0);
         setTradingAsset(data.tradingAsset || "USDT");
+        setLastSettlement(data.lastSettlement || null);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -90,6 +93,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (initialInvestment > 0 && !isTrading && setupStep === 1) {
+      setSetupStep(2);
+    }
+  }, [initialInvestment, isTrading]);
+
   const [globalActivity, setGlobalActivity] = useState<any[]>([]);
 
   const toggleTrading = async () => {
@@ -127,6 +136,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           timestamp: new Date().toISOString()
         });
         toast.success("Trading engine started!");
+        setSetupStep(1);
       }
     } catch (e: any) {
       console.error("Trading toggle failed:", e);
@@ -199,8 +209,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         const userRef = doc(db, "users", user.uid);
         const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
         await updateDoc(userRef, {
-          isTrading: true,
-          initialInvestment: amount,
+          initialInvestment: walletBalance >= amount ? amount : walletBalance, // ensure safe deduction
           [balanceField]: amount,
           walletBalance: walletBalance - amount,
           tradingAsset: tradingAsset,
@@ -208,6 +217,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           activePair: selectedPair,
           totalProfit: 0
         });
+        setSetupStep(2);
 
         toast.success(`Successfully funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
       } else {
@@ -256,15 +266,15 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         const userRef = doc(db, "users", user.uid);
         const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
         await updateDoc(userRef, {
-          isTrading: true,
           initialInvestment: amount,
           [balanceField]: amount,
           tradingAsset: tradingAsset,
           activeStrategy: strategy,
           activePair: selectedPair,
           totalProfit: 0,
-          tradingSessionId: sessionId // Store the session ID if it exists
+          tradingSessionId: sessionId
         });
+        setSetupStep(2);
 
         toast.success(`Successfully funded ${amount} ${tradingAsset} from on-chain!`, { id: "fund" });
       }
@@ -381,6 +391,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         {/* Pair & Strategy Selection */}
         <div className="lg:col-span-1 space-y-4 md:space-y-6">
         {/* Fund Trading */}
+        {!isTrading && setupStep === 1 && (
         <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Fund Trading Account</h3>
@@ -423,7 +434,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               disabled={isTrading || loading}
               className="bg-orange-500 text-black px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50 whitespace-nowrap"
             >
-              {loading ? "Processing..." : "Fund & Start"}
+              {loading ? "Processing..." : "Fund Account"}
             </button>
           </div>
           <p className="text-[10px] text-white/40">
@@ -433,8 +444,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             Trading Balance: <span className="text-green-400 font-bold">{(initialInvestment + pnl).toFixed(2)} {tradingAsset}</span>
           </p>
         </div>
+        )}
 
           {/* Pair Selection */}
+          {!isTrading && setupStep === 2 && (
           <div className="space-y-3 md:space-y-4">
             <h3 className="text-sm md:text-lg font-bold tracking-tight mb-1 md:mb-4">Select Trading Pair</h3>
             <div className="grid grid-cols-2 gap-2">
@@ -454,9 +467,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                 </button>
               ))}
             </div>
+            <button onClick={() => setSetupStep(3)} className="w-full mt-2 bg-white/10 hover:bg-white/20 py-2 rounded-xl text-xs font-bold transition-all">Next: Select Strategy</button>
           </div>
+          )}
 
           {/* Strategy Selection */}
+          {!isTrading && setupStep >= 3 && (
           <div className="space-y-3 md:space-y-4">
             <h3 className="text-sm md:text-lg font-bold tracking-tight mb-1 md:mb-4">Select Strategy</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2 md:gap-4">
@@ -482,25 +498,36 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                 </button>
               ))}
             </div>
+            {setupStep === 3 ? (
+              <button onClick={() => setSetupStep(4)} className="w-full mt-2 bg-white/10 hover:bg-white/20 py-2 rounded-xl text-xs font-bold transition-all">Next: Review & Start</button>
+            ) : (
+              <div className="mt-4 p-4 border border-orange-500/30 bg-orange-500/10 rounded-2xl space-y-2">
+                <h4 className="text-orange-500 font-bold text-sm">Summary</h4>
+                <p className="text-xs text-white/70">Asset: <span className="text-white font-bold">{tradingAsset}</span></p>
+                <p className="text-xs text-white/70">Pair: <span className="text-white font-bold">{selectedPair}</span></p>
+                <p className="text-xs text-white/70">Strategy: <span className="text-white font-bold">{strategy}</span></p>
+                <p className="text-xs text-white/70">Funded: <span className="text-green-400 font-bold">{initialInvestment.toFixed(2)}</span></p>
+                <button 
+                  onClick={toggleTrading}
+                  disabled={loading}
+                  className="w-full mt-3 py-3 rounded-xl font-bold text-sm bg-orange-500 text-black hover:scale-[1.02] transition-transform shadow-lg shadow-orange-500/20"
+                >
+                  {loading ? "Processing..." : "Start Trading"}
+                </button>
+              </div>
+            )}
           </div>
+          )}
 
           {isTrading && (
             <div className="space-y-3">
-              <button
-                onClick={withdrawProfit}
-                disabled={loading || pnl <= 0}
-                className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all bg-green-500/10 border border-green-500/20 text-green-500 hover:bg-green-500/20 disabled:opacity-50"
-              >
-                <ArrowDownLeft size={16} />
-                <span>Withdraw Profit to Wallet Balance</span>
-              </button>
               <button
                 onClick={toggleTrading}
                 disabled={loading}
                 className="w-full py-4 md:py-6 rounded-xl md:rounded-3xl font-bold text-base md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 shadow-xl shadow-red-500/5"
               >
                 <Square size={18} className="md:w-6 md:h-6" fill="currentColor" />
-                <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Stop & Withdraw to Wallet Balance"}</span>
+                <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Close Trading"}</span>
               </button>
             </div>
           )}
@@ -508,27 +535,85 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
         {/* Live PnL & Activity */}
         <div className="lg:col-span-2 space-y-4 md:space-y-6">
-          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden shadow-2xl">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 md:mb-8">
-              <div>
-                <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Live Profit/Loss</p>
-                <h3 className={`text-2xl md:text-5xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} <span className="text-base md:text-2xl opacity-60">USDT</span>
-                </h3>
-              </div>
-              <div className="sm:text-right flex flex-col sm:items-end gap-2">
-                <div>
-                  <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Pair</p>
-                  <div className="flex items-center gap-2 sm:justify-end">
-                    <img src={activePairData.logo} alt={selectedPair} className="w-5 h-5 md:w-6 md:h-6 object-contain" referrerPolicy="no-referrer" />
-                    <p className="text-base md:text-xl font-bold text-white">{selectedPair}</p>
+          {!isTrading ? (
+            lastSettlement ? (
+              <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-6 md:p-10 relative overflow-hidden shadow-2xl flex flex-col items-center justify-center min-h-[400px]">
+                <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mb-6">
+                  <Target size={32} className="text-green-400" />
+                </div>
+                <h2 className="text-3xl font-bold mb-2">Trade Session Settled</h2>
+                <p className="text-white/40 mb-8 max-w-md text-center">Your bot session has been successfully closed. Funds and your profit distribution have been returned to your wallet.</p>
+                
+                <div className="w-full max-w-sm space-y-3">
+                  <div className="flex justify-between items-center p-4 bg-white/5 rounded-xl border border-white/5">
+                    <span className="text-white/40 font-bold uppercase text-xs">Total Returned</span>
+                    <span className="text-xl font-bold">{lastSettlement.amount?.toFixed(2)} {lastSettlement.asset}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-white/5 rounded-xl border border-white/5">
+                    <span className="text-white/40 font-bold uppercase text-xs">Your Net Profit</span>
+                    <span className={`text-xl font-bold ${lastSettlement.profit >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {lastSettlement.profit >= 0 ? "+" : ""}{lastSettlement.profit?.toFixed(2)} {lastSettlement.asset}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-white/5 rounded-xl border border-white/5">
+                    <span className="text-white/40 font-bold uppercase text-xs">Platform Fee (50%)</span>
+                    <span className="text-xl font-bold text-orange-500">{lastSettlement.treasury?.toFixed(2)} {lastSettlement.asset}</span>
                   </div>
                 </div>
-                <div>
-                  <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Active Strategy</p>
-                  <p className="text-base md:text-xl font-bold text-orange-500">{strategy}</p>
-                </div>
+                <button onClick={() => setLastSettlement(null)} className="mt-8 text-white/40 hover:text-white text-sm font-bold underline transition-colors">Start a new session</button>
               </div>
+            ) : (
+              <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-6 md:p-10 shadow-2xl flex flex-col items-center justify-center min-h-[400px]">
+                <Activity size={48} className="text-white/10 mb-4" />
+                <h3 className="text-xl font-bold text-white/40">System Offline</h3>
+                <p className="text-sm text-white/20 mt-2 text-center max-w-sm">Complete the setup on the left to launch the AI trading engine and visually track live trade activity here.</p>
+              </div>
+            )
+          ) : (
+            <>
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden shadow-2xl">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 md:gap-6 mb-6 pb-6 border-b border-white/5">
+              <div>
+                <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Live PNL</p>
+                <h3 className={`text-xl md:text-3xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} <span className="text-sm md:text-lg opacity-60 uppercase">{tradingAsset}</span>
+                </h3>
+              </div>
+              
+              <div>
+                <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">ROI %</p>
+                <h3 className={`text-xl md:text-3xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {pnl >= 0 ? "+" : ""}{initialInvestment > 0 ? ((pnl / initialInvestment) * 100).toFixed(2) : "0.00"}%
+                </h3>
+              </div>
+
+              <div>
+                <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Position Margin</p>
+                <h3 className="text-xl md:text-3xl font-bold tracking-tighter text-white">
+                  {initialInvestment.toFixed(2)} <span className="text-sm md:text-lg opacity-60 uppercase">{tradingAsset}</span>
+                </h3>
+              </div>
+
+              <div>
+                <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Trades Executed</p>
+                <h3 className="text-xl md:text-3xl font-bold tracking-tighter text-white">
+                  {history.length > 1 ? history.length : 0}
+                </h3>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center mb-6">
+               <div className="flex items-center gap-3">
+                 <img src={activePairData.logo} alt={selectedPair} className="w-6 h-6 md:w-8 md:h-8 object-contain" referrerPolicy="no-referrer" />
+                 <div>
+                   <p className="text-xs text-white/40 font-bold uppercase">Trading Pair</p>
+                   <p className="text-base md:text-xl font-bold text-white">{selectedPair}</p>
+                 </div>
+               </div>
+               <div className="text-right">
+                 <p className="text-xs text-white/40 font-bold uppercase">Active Strategy</p>
+                 <p className="text-base md:text-xl font-bold text-orange-500">{strategy}</p>
+               </div>
             </div>
 
             {/* Candlestick Chart Simulation */}
@@ -669,6 +754,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               </AnimatePresence>
             </div>
           </div>
+            </>
+          )}
         </div>
       </div>
       {/* Withdraw Modal */}
