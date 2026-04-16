@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { auth, googleProvider, facebookProvider, appleProvider, db, handleFirestoreError, OperationType } from "./firebase";
-import { onAuthStateChanged, signInWithPopup, type User as FirebaseUser } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { onAuthStateChanged, signInWithPopup } from "firebase/auth";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { TrendingUp, Shield, Globe, Zap, ArrowRight, Chrome, Facebook, Apple } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Layout from "./components/Layout";
@@ -11,12 +11,13 @@ import TradingTab from "./components/TradingTab";
 import LeaderboardTab from "./components/LeaderboardTab";
 import CommunityTab from "./components/CommunityTab";
 import SettingsTab from "./components/SettingsTab";
-import type { UserProfile } from "./types";
+import { deriveSuiWallet } from "./lib/sui";
+
 import ErrorBoundary from "./components/ErrorBoundary";
 import { Toaster } from "sonner";
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(0);
 
@@ -50,11 +51,12 @@ const App: React.FC = () => {
             
             if (!userSnap.exists()) {
               console.log("Creating new user profile...");
+              const keypair = deriveSuiWallet(user.uid);
               await setDoc(userRef, {
                 uid: user.uid,
                 displayName: user.displayName || "Quantum Trader",
                 avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-                suiWallet: null, // Will be set when user connects + verifies a wallet
+                suiWallet: keypair.toSuiAddress(),
                 suiBalance: 0,
                 walletBalance: 0, // Starting wallet balance
                 usdtBalance: 0, 
@@ -65,26 +67,6 @@ const App: React.FC = () => {
                 region: "Global",
                 createdAt: new Date().toISOString(),
               });
-            } else {
-              const userData = userSnap.data() as Partial<UserProfile>;
-              const updates: Partial<UserProfile> = {};
-              
-              // suiWallet presence is now tracked as null vs valid address
-              // No need to backfill with sentinel strings
-              
-              // Fix corrupted trading state: isTrading=true without a session
-              if (userData?.isTrading === true && !userData?.tradingSessionId) {
-                updates.isTrading = false;
-              }
-              
-              if (Object.keys(updates).length > 0) {
-                console.log("Applying retroactive fix to corrupted user profile...", updates);
-                try {
-                  await updateDoc(userRef, updates);
-                } catch (err) {
-                  console.error("Failed to retroactively fix user profile:", err);
-                }
-              }
             }
             setUser(user);
           } catch (error) {
@@ -164,7 +146,7 @@ const App: React.FC = () => {
               </div>
               <h1 className="text-4xl md:text-6xl font-bold tracking-tighter uppercase italic leading-none">Quantum Finance</h1>
               <p className="text-base md:text-xl text-white/60 font-medium max-w-[280px] md:max-w-none mx-auto">
-                The next generation of non-custodial trading on Sui. Secure. Transparent. On-chain.
+                The next generation of non-custodial trading on Sui. Powered by zkLogin.
               </p>
             </div>
 

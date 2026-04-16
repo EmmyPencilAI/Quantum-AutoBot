@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { Trophy, TrendingUp, User, Activity, Medal, Star } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { toast } from "sonner";
-import type { LeaderboardEntry, FirebaseUser } from "../types";
 
 interface LeaderboardTabProps {
-  user: FirebaseUser | null;
+  user: any;
 }
 
 const LeaderboardTab: React.FC<LeaderboardTabProps> = ({ user }) => {
-  const [traders, setTraders] = useState<LeaderboardEntry[]>([]);
+  const [traders, setTraders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserRank, setCurrentUserRank] = useState<number | null>(null);
 
@@ -17,16 +15,19 @@ const LeaderboardTab: React.FC<LeaderboardTabProps> = ({ user }) => {
     const fetchLeaderboard = async () => {
       try {
         const response = await fetch("/api/leaderboard");
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data: LeaderboardEntry[] = await response.json();
+        const data = await response.json();
         setTraders(data);
+        
         if (user) {
-          const rank = data.findIndex((t) => t.id === user.uid);
-          setCurrentUserRank(rank !== -1 ? rank + 1 : null);
+          const rank = data.findIndex((t: any) => t.id === user.uid);
+          if (rank !== -1) {
+            setCurrentUserRank(rank + 1);
+          } else {
+            setCurrentUserRank(null);
+          }
         }
-      } catch (error: any) {
+      } catch (error) {
         console.error("Error fetching leaderboard:", error);
-        toast.error("Failed to load leaderboard. Retrying...");
       } finally {
         setLoading(false);
       }

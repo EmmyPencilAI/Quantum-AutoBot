@@ -6,18 +6,20 @@
     <title>Quantum Finance | Web3 Trading on Sui</title>
     <script src="https://s3.tradingview.com/tv.js"></script>
     <script>
-      // Early error suppression for cross-origin frame access
+      // Early error suppression for cross-origin frame access and wallet extensions
       // This is common in preview environments where third-party scripts (like TradingView)
-      // try to access the parent/top frame.
+      // try to access the parent/top frame or wallet extensions try to inject.
       window.addEventListener('error', function(event) {
         if (event.message && (
           event.message.indexOf('Blocked a frame with origin') !== -1 ||
           event.message.indexOf("read a named property 'origin' from 'Location'") !== -1 ||
-          event.message.indexOf('cross-origin frame') !== -1
+          event.message.indexOf('cross-origin frame') !== -1 ||
+          event.message.indexOf('MetaMask') !== -1 ||
+          event.message.indexOf('ethereum') !== -1
         )) {
           event.stopImmediatePropagation();
           event.preventDefault();
-          console.warn('Suppressed cross-origin frame error:', event.message);
+          console.warn('Suppressed environmental error:', event.message);
           return true;
         }
       }, true);
@@ -26,11 +28,13 @@
       window.addEventListener('unhandledrejection', function(event) {
         if (event.reason && event.reason.message && (
           event.reason.message.indexOf('Blocked a frame with origin') !== -1 ||
-          event.reason.message.indexOf("read a named property 'origin' from 'Location'") !== -1
+          event.reason.message.indexOf("read a named property 'origin' from 'Location'") !== -1 ||
+          event.reason.message.indexOf('MetaMask') !== -1 ||
+          event.reason.message.indexOf('ethereum') !== -1
         )) {
           event.stopImmediatePropagation();
           event.preventDefault();
-          console.warn('Suppressed cross-origin promise rejection:', event.reason.message);
+          console.warn('Suppressed environmental promise rejection:', event.reason.message);
         }
       }, true);
     </script>

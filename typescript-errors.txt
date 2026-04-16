@@ -1,1 +1,0 @@
-src/components/TradingTab.tsx(847,1): error TS1005: '}' expected.
