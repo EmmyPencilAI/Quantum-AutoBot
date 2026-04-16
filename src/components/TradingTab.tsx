@@ -594,9 +594,14 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                               {data.isUp ? "UP" : "DOWN"} • {data.value.toFixed(4)} USDT
                             </p>
                             {data.isTrade && (
-                              <p className="text-[10px] font-bold text-orange-500 mt-1 uppercase">
-                                Trade Taken: {data.type}
-                              </p>
+                              <div className="mt-1 space-y-0.5">
+                                <p className="text-[10px] font-bold text-orange-500 uppercase">
+                                  Trade Taken: {data.type}
+                                </p>
+                                <p className="text-[9px] text-white/60">
+                                  Lot Size: {data.lotSize?.toFixed(2) || "0.05"}
+                                </p>
+                              </div>
                             )}
                           </div>
                         );
@@ -668,7 +673,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                         <div className="min-w-0">
                           <p className="font-bold text-xs md:text-base truncate">{trade.pair}</p>
                           <p className="text-[9px] md:text-xs text-white/40 truncate">
-                            {trade.amount?.toFixed(2) || "0.00"} USDT • {trade.duration || 0}s
+                            {trade.amount?.toFixed(2) || "0.00"} USDT • {trade.lotSize?.toFixed(2) || "0.05"} Lot • {trade.duration || 0}s
                           </p>
                         </div>
                       </div>

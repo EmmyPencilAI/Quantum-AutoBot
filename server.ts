@@ -60,16 +60,20 @@ if (fs.existsSync(firebaseConfigPath)) {
     const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
     
     try {
-      db = getFirestore(adminApp, dbId);
+      // Explicitly check if dbId is a placeholder or empty
+      const finalDbId = (!dbId || dbId.includes("TODO") || dbId === "") ? "(default)" : dbId;
+      console.log(`Attempting to connect to Firestore Database: ${finalDbId}`);
+      
+      db = getFirestore(adminApp, finalDbId);
       // Test the connection immediately with a write operation
       await db.collection("health_check").doc("ping").set({ 
         lastPing: new Date().toISOString(),
         projectId: firebaseConfig.projectId,
-        databaseId: dbId
+        databaseId: finalDbId
       });
-      console.log(`Firebase Admin connected successfully to database: ${dbId}`);
+      console.log(`Firebase Admin connected successfully to database: ${finalDbId}`);
     } catch (e: any) {
-      console.error(`Failed to connect to named database ${dbId}, falling back to (default):`, e.message);
+      console.error(`Failed to connect to database ${dbId}, falling back to (default):`, e.message);
       try {
         db = getFirestore(adminApp, "(default)");
         await db.collection("health_check").doc("ping").set({ 
@@ -80,6 +84,9 @@ if (fs.existsSync(firebaseConfigPath)) {
         console.log("Firebase Admin connected successfully to (default) database");
       } catch (e2: any) {
         console.error("Critical: Failed to connect to both named and (default) databases:", e2.message);
+        // If both fail, we still set db to (default) to allow the app to try, 
+        // but we log the failure clearly.
+        db = getFirestore(adminApp, "(default)");
       }
     }
     
@@ -150,11 +157,14 @@ async function postBotMessage() {
       createdAt: new Date().toISOString()
     };
     
-    console.log("Bot (Admin SDK) attempting to post:", JSON.stringify(postData));
+    console.log("Bot (Admin SDK) attempting to post to 'posts' collection...");
     await db.collection("posts").add(postData);
     console.log("Bot (Admin SDK) posted successfully:", message);
   } catch (error: any) {
-    console.error("Bot (Admin SDK) failed to post:", error.message || error);
+    console.error("Bot (Admin SDK) failed to post. Error Code:", error.code, "Message:", error.message || error);
+    if (error.code === 5) {
+      console.error("Diagnostic: 5 NOT_FOUND often means the database ID in firebase-applet-config.json is incorrect or the database was deleted.");
+    }
   }
 }
 
@@ -201,41 +211,57 @@ async function processBackgroundTrades() {
       const userData = userDoc.data();
       const strategy = userData.activeStrategy || "Momentum";
       
-      // AI Strategy: Aggressive trades on 100% win rate and high ROI (200-400%)
-      // We simulate this by ensuring profit is always positive for Aggressive strategy
+      // AI Strategy Parameters
       let profitFactor = 0.001; 
+      let winRate = 0.5;
       let isAggressive = strategy === "Aggressive";
       
       switch (strategy) {
         case "Aggressive": 
-          // High ROI: ~0.5% to 1.5% per 5 seconds
+          // High ROI: ~0.5% to 1.5% per update
           profitFactor = 0.005 + (Math.random() * 0.01); 
+          winRate = 1.0; // 100% Win Rate as requested
           break;
-        case "Momentum": profitFactor = 0.002; break;
-        case "Scalping": profitFactor = 0.001; break;
-        case "Conservative": profitFactor = 0.0005; break;
+        case "Momentum": 
+          profitFactor = 0.002; 
+          winRate = 0.65;
+          break;
+        case "Scalping": 
+          profitFactor = 0.0015; 
+          winRate = 0.75;
+          break;
+        case "Conservative": 
+          profitFactor = 0.0008; 
+          winRate = 0.85;
+          break;
       }
       
       const tradingAsset = userData.tradingAsset || "USDT";
       const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
       const currentAssetBalance = userData[balanceField] || 0;
 
-      // Randomize profit
-      // For Aggressive, we ensure it's always positive (100% win rate)
+      // Lot Size Logic: Start at 0.05 and grow overtime
+      let currentLotSize = userData.currentLotSize || 0.05;
+      // Grow lot size by 0.1% every update while trading
+      currentLotSize = Math.min(10.0, currentLotSize + (currentLotSize * 0.001));
+
+      // Randomize profit based on win rate
       let actualProfit = 0;
-      if (isAggressive) {
+      const isWin = Math.random() < winRate;
+      
+      if (isWin) {
         actualProfit = currentAssetBalance * profitFactor * (0.8 + Math.random() * 0.4);
       } else {
-        actualProfit = currentAssetBalance * profitFactor * (Math.random() * 2 - 0.8);
+        // Loss is usually smaller than profit for these strategies
+        actualProfit = -currentAssetBalance * (profitFactor * 0.5) * (0.5 + Math.random() * 0.5);
       }
       
       const newBalance = currentAssetBalance + actualProfit;
       const newTotalProfit = (userData.totalProfit || 0) + actualProfit;
       
       // Auto Reversal Logic
-      // We track a simulated "trend" and flip it occasionally
       let currentTrend = userData.currentTrend || "Long";
-      let trendProbability = isAggressive ? 0.15 : 0.05; // Aggressive reverses more often
+      let trendProbability = isAggressive ? 0.15 : 0.05; 
       if (Math.random() < trendProbability) {
         currentTrend = currentTrend === "Long" ? "Short" : "Long";
       }
@@ -244,16 +270,19 @@ async function processBackgroundTrades() {
         [balanceField]: newBalance,
         totalProfit: newTotalProfit,
         lastTradeAt: now,
-        currentTrend: currentTrend
+        currentTrend: currentTrend,
+        currentLotSize: currentLotSize
       });
       
-      // Create trade record
-      // For Aggressive, we create trades more frequently
-      if (Math.random() < (isAggressive ? 0.8 : 0.5)) {
+      // Trade Frequency: Targeting ~1,500 trades daily
+      // 86400s / 5s interval = 17280 intervals. 1500 / 17280 = ~0.087 probability
+      const tradeProbability = isAggressive ? 0.087 : 0.05; 
+      
+      if (Math.random() < tradeProbability) {
         const tradeRef = db.collection("trades").doc();
-        const tradeAmount = Math.abs(actualProfit) * (isAggressive ? 20 : 10);
+        // Trade amount influenced by lot size
+        const tradeAmount = currentLotSize * 1000; 
         
-        // Auto Reversal: Trade type matches trend
         const tradeType = currentTrend === "Long" ? "BUY" : "SELL";
         
         batch.set(tradeRef, {
@@ -261,6 +290,7 @@ async function processBackgroundTrades() {
           pair: userData.activePair || "BTC/USDT",
           type: tradeType,
           amount: tradeAmount,
+          lotSize: currentLotSize,
           asset: tradingAsset,
           price: 65000 + (Math.random() * 1000 - 500),
           pnl: actualProfit,
@@ -893,14 +923,57 @@ async function startServer() {
     // Real On-Chain Settlement if Private Key is present (Sui Implementation)
     if (account && process.env.SUI_PRIVATE_KEY) {
       try {
-        console.log(`Attempting on-chain settlement for ${account} on Sui with balance ${finalBalanceFormatted}`);
-        // In a real Sui implementation, we would use Sui SDK to execute a Move call
-        // For now, we simulate the success of the on-chain action
-        txHash = "0x" + Math.random().toString(16).slice(2);
-        console.log(`Sui Settlement TX simulated: ${txHash}`);
+        console.log(`Attempting REAL on-chain settlement for ${account} on Sui with balance ${finalBalanceFormatted}`);
+        
+        const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
+        const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+        const adminAddress = keypair.toSuiAddress();
+        
+        const txb = new Transaction();
+        // Default to USDT for simulation if not specified
+        const coinType = USDT_TYPE; 
+        const decimals = await getDecimals(coinType);
+        const rawAmount = Math.floor(finalBalanceFormatted * Math.pow(10, decimals));
+
+        if (rawAmount > 0) {
+          const coins = await suiClient.getCoins({
+            owner: adminAddress,
+            coinType: coinType,
+          });
+
+          if (coins.data.length > 0) {
+            const coinObjectIds = coins.data.map((c) => c.coinObjectId);
+            const primaryCoin = coinObjectIds[0];
+            const rest = coinObjectIds.slice(1);
+            
+            if (rest.length > 0) {
+              txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
+            }
+
+            const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawAmount]);
+            txb.transferObjects([mainCoin], account);
+            
+            txb.setGasBudget(20000000); // 0.02 SUI
+            
+            const result = await suiClient.signAndExecuteTransaction({
+              signer: keypair,
+              transaction: txb,
+            });
+            
+            txHash = result.digest;
+            await suiClient.waitForTransaction({ digest: txHash });
+            console.log(`Sui Settlement TX successful: ${txHash}`);
+          } else {
+            console.warn(`No coins found in treasury for settlement to ${account}`);
+            error = "Treasury has insufficient funds for this settlement";
+          }
+        } else {
+          console.log("Settlement amount is 0, skipping on-chain transaction");
+          txHash = "none";
+        }
       } catch (e: any) {
         console.error("Sui settlement failed:", e);
-        error = e.message || "Unknown Sui blockchain error";
+        error = e.message || "Sui blockchain transaction failed";
       }
     } else if (!process.env.SUI_PRIVATE_KEY) {
       console.log("Skipping on-chain settlement: SUI_PRIVATE_KEY not set");
@@ -1016,7 +1089,14 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      root: process.cwd(),
+      base: "/",
+      server: { 
+        middlewareMode: true,
+        fs: {
+          allow: [process.cwd()]
+        }
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
