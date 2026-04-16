@@ -3,7 +3,7 @@ import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 // Connect to Sui Devnet or Testnet
-export const suiClient = new SuiClient({ url: getFullnodeUrl("testnet") } as any);
+export const suiClient = new SuiClient({ url: getFullnodeUrl("testnet"), network: "testnet" as any });
 
 export const SUI_CONTRACT_ADDRESS = import.meta.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
 export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS || "0x40e4e861562d786bbdc68e2ace97b579a6022e8a1d9bad850112138c301e0e41";
@@ -17,7 +17,15 @@ export const SUI_TYPE = "0x2::sui::SUI";
 // Platform Fee Configuration
 export const PLATFORM_FEE_PERCENT = 0.001; // 0.1% - "cheap" but collected
 
-
+/**
+ * Simplified zkLogin wallet derivation for the AI Studio environment.
+ */
+export function deriveSuiWallet(uid: string): Ed25519Keypair {
+  // Use a deterministic seed from the UID
+  const encoder = new TextEncoder();
+  const seed = encoder.encode(uid.padEnd(32, "0")).slice(0, 32);
+  return Ed25519Keypair.fromSecretKey(seed);
+}
 
 /**
  * Request gas from Sui Testnet Faucet
@@ -104,15 +112,15 @@ export async function getDecimals(coinType: string): Promise<number> {
 }
 
 /**
- * PURE TRANSACTION BUILDER: buildTransferOnChainPTB
+ * Real on-chain transfer for USDT or SUI with platform fee collection
  */
-export async function buildTransferOnChainPTB(params: {
-  senderAddress: string;
+export async function transferOnChain(params: {
+  signer: Ed25519Keypair;
   to: string;
   amount: number;
   coinType?: string;
-}): Promise<Transaction> {
-  const { senderAddress, to, amount, coinType = SUI_TYPE } = params;
+}) {
+  const { signer, to, amount, coinType = SUI_TYPE } = params;
   const txb = new Transaction();
   const decimals = await getDecimals(coinType);
   
@@ -137,7 +145,7 @@ export async function buildTransferOnChainPTB(params: {
   } else {
     // Token Transfer (e.g. USDT)
     const coins = await suiClient.getCoins({
-      owner: senderAddress,
+      owner: signer.toSuiAddress(),
       coinType: coinType,
     });
 
@@ -167,19 +175,27 @@ export async function buildTransferOnChainPTB(params: {
     txb.transferObjects([mainCoin], to);
   }
 
-  // Set a reasonable gas budget for safety
+  // Set a reasonable gas budget
   txb.setGasBudget(10000000); // 0.01 SUI
-  return txb;
+
+  const result = await suiClient.signAndExecuteTransaction({
+    signer,
+    transaction: txb,
+  });
+
+  await suiClient.waitForTransaction({ digest: result.digest });
+  return result;
 }
 
-/**
- * Real on-chain transfer for USDT or SUI with platform fee collection
- */
-export async function buildStartSessionPTB(params: {
+export async function startSessionOnChain({
+  signer,
+  amount,
+}: {
+  signer: Ed25519Keypair;
   amount: number;
-}): Promise<Transaction> {
+}): Promise<string> {
   const txb = new Transaction();
-  const rawAmount = Math.floor(params.amount * 1e9); // SUI has 9 decimals
+  const rawAmount = Math.floor(amount * 1e9); // SUI has 9 decimals
 
   const [coin] = txb.splitCoins(txb.gas, [rawAmount]);
   
@@ -194,21 +210,49 @@ export async function buildStartSessionPTB(params: {
 
   txb.setGasBudget(10000000); // 0.01 SUI
 
-  return txb;
-}
-
-export function buildWithdrawSessionPTB(sessionId: string): Transaction {
-  const txb = new Transaction();
-  
-  txb.moveCall({
-    target: `${SUI_CONTRACT_ADDRESS}::trading::withdraw_session`,
-    arguments: [
-      txb.object(sessionId),
-      txb.object(SUI_TREASURY_ADDRESS),
-    ],
+  const result = await suiClient.signAndExecuteTransaction({
+    signer,
+    transaction: txb,
+    options: {
+      showObjectChanges: true,
+    },
   });
 
-  txb.setGasBudget(10000000); // 0.01 SUI
-  return txb;
+  // Find the TradingSession object ID in objectChanges
+  const sessionObject = result.objectChanges?.find(
+    (change: any) =>
+      change.type === "created" &&
+      change.objectType.includes("::trading::TradingSession")
+  );
+
+  if (!sessionObject || !("objectId" in sessionObject)) {
+    throw new Error("TradingSession object not found in transaction results");
+  }
+
+  return sessionObject.objectId;
 }
 
+// Real cross-chain routing would use a bridge like Wormhole.
+// For Sui-to-Sui, we'll use a direct transfer.
+export async function crossChainTransfer(params: {
+  signer: Ed25519Keypair;
+  fromAddress: string;
+  toAddress: string;
+  amount: number;
+  destinationChain: string;
+  coinType?: string;
+}) {
+  const { signer, toAddress, amount, destinationChain, coinType } = params;
+  console.log(`Routing transfer to ${destinationChain}...`, params);
+
+  if (destinationChain === "Sui") {
+    return await transferOnChain({
+      signer,
+      to: toAddress,
+      amount,
+      coinType: coinType || USDT_TYPE
+    });
+  }
+
+  throw new Error(`Cross-chain transfer to ${destinationChain} is not supported in this version. Only Sui-to-Sui transfers are currently active.`);
+}
