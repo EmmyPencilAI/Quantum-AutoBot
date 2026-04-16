@@ -39,7 +39,7 @@ if (fs.existsSync(firebaseConfigPath)) {
     
     if (!admin.apps.length) {
       // Check for service account credentials (required for Render/production)
-      const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
+      const serviceAccountEnv = process.env.GOOGLE_CREDENTIALS_JSON || process.env.FIREBASE_SERVICE_ACCOUNT;
       
       if (serviceAccountEnv) {
         try {
