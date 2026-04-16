@@ -2,7 +2,6 @@ import React from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Wallet, BarChart3, TrendingUp, Trophy, Users, Settings, LogOut } from "lucide-react";
 import { auth } from "../firebase";
-import { ConnectButton } from "@mysten/dapp-kit";
 
 interface LayoutProps {
   activeTab: number;
@@ -49,11 +48,8 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, user
           ))}
         </nav>
 
-        <div className="mt-auto pt-6 border-t border-white/10 flex flex-col gap-4">
-          <div className="flex justify-center w-full">
-            <ConnectButton className="!bg-blue-600 hover:!bg-blue-500 !text-white !rounded-xl !transition-all !border-none !py-2 !w-full" />
-          </div>
-          <div className="flex items-center gap-3">
+        <div className="mt-auto pt-6 border-t border-white/10">
+          <div className="flex items-center gap-3 mb-4">
             <img
               src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
               alt="Avatar"
@@ -85,8 +81,7 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children, user
             </div>
             <span className="font-bold uppercase tracking-wider text-sm md:text-base">Quantum</span>
           </div>
-          <div className="flex items-center gap-2 md:gap-3">
-            <ConnectButton className="!bg-blue-600 hover:!bg-blue-500 !text-white !rounded-lg !transition-all !border-none !px-3 !py-1.5 !text-[10px]" />
+          <div className="flex items-center gap-3">
             <img
               src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
               alt="Avatar"

@@ -101,21 +101,24 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         // Settlement logic
         toast.loading("Settling trades on-chain...", { id: "settle" });
         const address = deriveSuiWallet(user.uid).toSuiAddress();
+        const idToken = await user.getIdToken();
         const response = await fetch("/api/trading/settle", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`
+          },
           body: JSON.stringify({ uid: user.uid, walletAddress: address })
         });
-        
-        // Check if response is JSON before parsing
-        const contentType = response.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          throw new Error("Server returned non-JSON response. API may be unavailable. Please try again.");
-        }
-
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `Server error: ${response.status}`);
+          const text = await response.text();
+          console.error("Settlement API error:", text);
+          try {
+            const errorData = JSON.parse(text);
+            throw new Error(errorData.error || `Server error: ${response.status}`);
+          } catch (e) {
+            throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
+          }
         }
 
         const result = await response.json();
@@ -224,8 +227,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           walletBalance: walletBalance - amount,
           tradingAsset: tradingAsset,
           activeStrategy: strategy,
-          activePair: selectedPair,
-          totalProfit: 0
+          activePair: selectedPair
+          // REMOVED totalProfit: 0 to persist leaderboard score
         });
 
         toast.success(`Successfully funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
@@ -330,9 +333,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     toast.loading("Withdrawing profit to wallet balance...", { id: "withdraw-profit" });
     try {
       const address = deriveSuiWallet(user.uid).toSuiAddress();
+      const idToken = await user.getIdToken();
       const response = await fetch("/api/trading/withdraw-profit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`
+        },
         body: JSON.stringify({ uid: user.uid, walletAddress: address })
       });
 

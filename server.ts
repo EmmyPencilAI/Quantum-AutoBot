@@ -105,6 +105,63 @@ if (fs.existsSync(firebaseConfigPath)) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Authentication middleware for backend APIs
+async function authenticate(req: any, res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    console.warn(`Unauthorized attempt: ${req.method} ${req.url} - Missing header`);
+    return res.status(401).json({ error: "Unauthorized: Missing or invalid authorization header" });
+  }
+
+  const idToken = authHeader.split(" ")[1];
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    req.user = decodedToken;
+    // Check if the UID in body/params matches the token UID for extra security
+    const requestedUid = req.body.uid || req.query.uid;
+    if (requestedUid && requestedUid !== decodedToken.uid) {
+      console.warn(`Security Breach attempt: ${decodedToken.uid} tried to access ${requestedUid}'s data`);
+      return res.status(403).json({ error: "Forbidden: You can only access your own data" });
+    }
+    next();
+  } catch (error) {
+    console.error("Authentication failed:", error);
+    return res.status(401).json({ error: "Unauthorized: Invalid ID token" });
+  }
+}
+
+// Migration to fix missing totalProfit fields (確保 Leaderboard 顯示所有用戶)
+async function fixMissingTotalProfit() {
+  if (!db) return;
+  try {
+    console.log("Starting migration to fix missing totalProfit fields...");
+    const usersSnapshot = await db.collection("users").get();
+    let fixedCount = 0;
+    const batch = db.batch();
+    
+    for (const doc of usersSnapshot.docs) {
+      const data = doc.data();
+      if (data.totalProfit === undefined) {
+        batch.update(doc.ref, { totalProfit: 0 });
+        fixedCount++;
+      }
+      // Periodically commit large batches
+      if (fixedCount % 400 === 0 && fixedCount > 0) {
+        await batch.commit();
+      }
+    }
+    
+    if (fixedCount > 0) {
+      await batch.commit();
+      console.log(`Migration completed: Fixed ${fixedCount} users.`);
+    } else {
+      console.log("Migration completed: No users required fixing.");
+    }
+  } catch (error) {
+    console.error("Migration failed:", error);
+  }
+}
+
 // Community Bot Logic
 const BOT_MESSAGES = [
   "🚀 Quantum Alpha strategy just hit a 15% gain on BTC/USDT!",
@@ -337,6 +394,8 @@ async function processBackgroundTrades() {
 // Run background trading every 5 seconds for real-time feel
 if (db) {
   setInterval(processBackgroundTrades, 5000);
+  // Run migration on startup
+  fixMissingTotalProfit();
 }
 
 // Sui Config (Mirroring src/lib/sui.ts)
@@ -376,7 +435,7 @@ async function getDecimals(coinType: string): Promise<number> {
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+  const PORT = 3000;
 
   app.use(cors());
   app.use(express.json());
@@ -407,16 +466,14 @@ async function startServer() {
     next();
   });
 
-  // Health check endpoint to verify API is running
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString(), dbConnected: !!db });
-  });
-
   // Wallet Withdrawal Endpoint
-  app.post("/api/wallet/withdraw", async (req, res) => {
+  app.post("/api/wallet/withdraw", authenticate, async (req, res) => {
     if (!db) return res.status(500).json({ error: "Database not initialized" });
     const { uid, amount, asset, walletAddress } = req.body;
     if (!uid || !amount || !walletAddress) return res.status(400).json({ error: "Invalid request" });
+    
+    // Safety: ensure UID matches token (handled in authenticate middleware but double checking)
+    if ((req as any).user.uid !== uid) return res.status(403).json({ error: "Unauthorized access" });
 
     try {
       const userRef = db.collection("users").doc(uid);
@@ -505,28 +562,24 @@ async function startServer() {
         } catch (e: any) {
           console.error("Real Sui withdrawal failed:", e);
           onChainError = e.message || "Sui blockchain transaction failed";
-          // FIX: Don't rollback - allow the DB withdrawal to succeed even if on-chain fails
-          // The on-chain transfer can be retried manually by admin
-          console.log(`On-chain failed but DB withdrawal preserved for ${uid}. Amount: ${amount}. Error: ${onChainError}`);
-          isSimulated = true; // Mark as simulated since on-chain didn't complete
+          
+          // Rollback Firestore if on-chain fails
+          await userRef.update({
+            walletBalance: currentWalletBalance // Rollback
+          });
+          return res.status(500).json({ error: "On-chain transfer failed. Balance rolled back." });
         }
       }
 
       // Create notification
-      const notifTitle = onChainError ? "Withdrawal Processed (Pending On-Chain)" : "Withdrawal Successful";
-      const notifMessage = onChainError 
-        ? `Withdrawn ${amount.toFixed(2)} ${asset || 'USD'} from trading wallet. On-chain transfer pending.`
-        : `Successfully withdrawn ${amount.toFixed(2)} ${asset || 'USD'} to your on-chain wallet.`;
-
       await db.collection("notifications").add({
         uid,
         type: "WITHDRAWAL",
-        title: notifTitle,
-        message: notifMessage,
+        title: "Withdrawal Successful",
+        message: `Successfully withdrawn ${amount.toFixed(2)} ${asset || 'USD'} to your on-chain wallet.`,
         amount,
         asset: asset || 'USD',
         txHash,
-        onChainError: onChainError || null,
         timestamp: new Date().toISOString(),
         read: false
       });
@@ -536,12 +589,9 @@ async function startServer() {
         newWalletBalance,
         txHash,
         isSimulated,
-        onChainError: onChainError || null,
-        message: onChainError 
-          ? `Withdrawal processed. On-chain transfer pending: ${onChainError}`
-          : isSimulated 
-            ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
-            : "Withdrawal successful."
+        message: isSimulated 
+          ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
+          : "Withdrawal successful."
       });
     } catch (error: any) {
       console.error("Withdrawal error:", error);
@@ -550,9 +600,12 @@ async function startServer() {
   });
 
   // Trading Engine Simulation & Settlement
-  app.post("/api/trading/settle", async (req, res) => {
+  app.post("/api/trading/settle", authenticate, async (req, res) => {
     const { uid, walletAddress } = req.body;
     if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
+
+    // Safety: ensure UID matches token
+    if ((req as any).user.uid !== uid) return res.status(403).json({ error: "Unauthorized access" });
 
     try {
       const userRef = db.collection("users").doc(uid);
@@ -594,41 +647,12 @@ async function startServer() {
         }
       });
 
-      // Track treasury commission (50% profit share)
-      if (treasuryShare > 0) {
-        // 1. Accumulate in treasury balance document
-        const treasuryRef = db.collection("treasury").doc("balance");
-        const treasuryDoc = await treasuryRef.get();
-        const currentTreasuryBalance = treasuryDoc.exists ? (treasuryDoc.data().totalBalance || 0) : 0;
-        
-        await treasuryRef.set({
-          totalBalance: currentTreasuryBalance + treasuryShare,
-          lastUpdated: new Date().toISOString(),
-          walletAddress: SUI_TREASURY_ADDRESS
-        }, { merge: true });
-
-        // 2. Create individual commission record for audit trail
-        await db.collection("treasury_commissions").add({
-          uid,
-          userName: userData.displayName || "Unknown",
-          amount: treasuryShare,
-          asset: tradingAsset,
-          type: "SETTLEMENT_COMMISSION",
-          userProfit: profit,
-          userShare: userProfitShare,
-          treasuryWallet: SUI_TREASURY_ADDRESS,
-          timestamp: new Date().toISOString()
-        });
-
-        console.log(`Treasury commission recorded: +${treasuryShare.toFixed(2)} ${tradingAsset} from ${userData.displayName || uid}`);
-      }
-
       // Create notification
       await db.collection("notifications").add({
         uid,
         type: "TRADE_STOPPED",
         title: "Trading Stopped",
-        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet. Platform fee: ${treasuryShare.toFixed(2)} ${tradingAsset}.`,
+        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet.`,
         amount: totalToUser,
         asset: tradingAsset,
         timestamp: new Date().toISOString(),
@@ -751,9 +775,12 @@ async function startServer() {
   });
 
   // Withdraw profit without stopping trade
-  app.post("/api/trading/withdraw-profit", async (req, res) => {
+  app.post("/api/trading/withdraw-profit", authenticate, async (req, res) => {
     const { uid, walletAddress } = req.body;
     if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
+
+    // Safety: ensure UID matches token
+    if ((req as any).user.uid !== uid) return res.status(403).json({ error: "Unauthorized access" });
 
     try {
       const userRef = db.collection("users").doc(uid);
@@ -782,43 +809,16 @@ async function startServer() {
 
       await userRef.update({
         [balanceField]: initialInvestment, // Reset trading balance to initial
-        walletBalance: newWalletBalance,
-        totalProfit: (userData.totalProfit || 0) - userProfitShare // Adjust total profit since we're withdrawing it
+        walletBalance: newWalletBalance
+        // totalProfit is cumulative, do not subtract withdrawn profit from it
       });
-
-      // Track treasury commission (50% profit share)
-      if (treasuryShare > 0) {
-        const treasuryRef = db.collection("treasury").doc("balance");
-        const treasuryDoc = await treasuryRef.get();
-        const currentTreasuryBalance = treasuryDoc.exists ? (treasuryDoc.data().totalBalance || 0) : 0;
-        
-        await treasuryRef.set({
-          totalBalance: currentTreasuryBalance + treasuryShare,
-          lastUpdated: new Date().toISOString(),
-          walletAddress: SUI_TREASURY_ADDRESS
-        }, { merge: true });
-
-        await db.collection("treasury_commissions").add({
-          uid,
-          userName: userData.displayName || "Unknown",
-          amount: treasuryShare,
-          asset: tradingAsset,
-          type: "PROFIT_WITHDRAWAL_COMMISSION",
-          userProfit: profit,
-          userShare: userProfitShare,
-          treasuryWallet: SUI_TREASURY_ADDRESS,
-          timestamp: new Date().toISOString()
-        });
-
-        console.log(`Treasury commission (profit withdrawal): +${treasuryShare.toFixed(2)} ${tradingAsset} from ${userData.displayName || uid}`);
-      }
 
       // Create notification
       await db.collection("notifications").add({
         uid,
         type: "PROFIT_WITHDRAWAL",
         title: "Profit Withdrawn",
-        message: `Withdrawn ${userProfitShare.toFixed(2)} ${tradingAsset} profit to your wallet balance. Platform fee: ${treasuryShare.toFixed(2)} ${tradingAsset}.`,
+        message: `Withdrawn ${userProfitShare.toFixed(2)} ${tradingAsset} profit to your wallet balance.`,
         amount: userProfitShare,
         asset: tradingAsset,
         timestamp: new Date().toISOString(),
@@ -876,88 +876,9 @@ async function startServer() {
     }
   });
 
-  // Community Comments
-  app.post("/api/community/comment", async (req, res) => {
-    console.log("POST /api/community/comment", req.body);
-    if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
-    try {
-      const { postId, uid, authorName, authorAvatar, content } = req.body;
-      if (!postId || !uid || !content) {
-        return res.status(400).json({ success: false, error: "Missing required fields" });
-      }
+  // Community Endpoints handled directly via Firestore SDK from frontend now
 
-      // Check if post exists
-      const postRef = db.collection("posts").doc(postId);
-      const postDoc = await postRef.get();
-      if (!postDoc.exists) {
-        console.error(`Post not found: ${postId}`);
-        return res.status(404).json({ success: false, error: "Post not found" });
-      }
-
-      const comment = {
-        uid,
-        authorName,
-        authorAvatar,
-        content,
-        createdAt: new Date().toISOString()
-      };
-
-      await postRef.collection("comments").add(comment);
-      await postRef.update({
-        commentsCount: admin.firestore.FieldValue.increment(1)
-      });
-
-      console.log(`Comment added to post ${postId} by user ${uid}`);
-      res.json({ success: true, comment });
-    } catch (error: any) {
-      console.error("Comment error:", error);
-      res.status(500).json({ success: false, error: error.message || "Internal server error" });
-    }
-  });
-
-  app.post("/api/community/like", async (req, res) => {
-    console.log("POST /api/community/like", req.body);
-    if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
-    try {
-      const { postId, uid } = req.body;
-      if (!postId || !uid) {
-        return res.status(400).json({ success: false, error: "Missing required fields" });
-      }
-
-      const postRef = db.collection("posts").doc(postId);
-      const postDoc = await postRef.get();
-      if (!postDoc.exists) {
-        console.error(`Post not found: ${postId}`);
-        return res.status(404).json({ success: false, error: "Post not found" });
-      }
-
-      const likeRef = postRef.collection("likes").doc(uid);
-      const likeDoc = await likeRef.get();
-
-      if (likeDoc.exists) {
-        // Unlike
-        await likeRef.delete();
-        await postRef.update({
-          likesCount: admin.firestore.FieldValue.increment(-1)
-        });
-        console.log(`User ${uid} unliked post ${postId}`);
-        return res.json({ success: true, liked: false });
-      } else {
-        // Like
-        await likeRef.set({ uid, createdAt: new Date().toISOString() });
-        await postRef.update({
-          likesCount: admin.firestore.FieldValue.increment(1)
-        });
-        console.log(`User ${uid} liked post ${postId}`);
-        return res.json({ success: true, liked: true });
-      }
-    } catch (error: any) {
-      console.error("Like error:", error);
-      res.status(500).json({ success: false, error: error.message || "Internal server error" });
-    }
-  });
-
-  app.post("/api/trading/simulate", async (req, res) => {
+  app.post("/api/trading/simulate", authenticate, async (req, res) => {
     const { strategy, principal, duration, account } = req.body;
     
     if (isNaN(principal) || principal <= 0) {
@@ -1139,6 +1060,7 @@ async function startServer() {
       };
       
       if (apiKey) {
+        // Try both header and query param for maximum compatibility
         headers['x-cg-demo-api-key'] = apiKey;
       }
       
@@ -1148,6 +1070,7 @@ async function startServer() {
         const text = await response.text();
         console.warn(`CoinGecko API returned status ${response.status}: ${text}`);
         
+        // If unauthorized or rate limited, return a fallback to keep the UI working
         if (response.status === 401 || response.status === 429 || response.status === 403) {
           console.log("Returning fallback price data due to API error");
           return res.json(getFallbackPrices());
@@ -1159,6 +1082,7 @@ async function startServer() {
       res.json(data);
     } catch (error) {
       console.error("Failed to fetch prices:", error);
+      // Always return fallback data instead of 500 to keep the app functional
       res.json(getFallbackPrices());
     }
   });
@@ -1177,26 +1101,20 @@ async function startServer() {
     ];
   }
 
-  // Production static file serving - MUST be AFTER all API routes
-  if (process.env.NODE_ENV === "production") {
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    // Already handled at the top
+  } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    // Only serve index.html for non-API GET requests (SPA fallback)
     app.get("*", (req, res) => {
-      if (req.url.startsWith('/api')) {
-        return res.status(404).json({ error: "API endpoint not found" });
-      }
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Quantum Finance Server running on http://localhost:${PORT}`);
-    console.log(`API routes registered. NODE_ENV=${process.env.NODE_ENV}`);
   });
 }
 
-startServer().catch((err) => {
-  console.error("FATAL: Server failed to start:", err);
-  process.exit(1);
-});
+startServer();

@@ -1,16 +1,12 @@
-﻿import React, { useState, useEffect } from "react";
-import { Copy, Send, ArrowDownLeft, Plus, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets, AlertTriangle, ExternalLink, Smartphone, Monitor } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
 import { motion } from "motion/react";
-import { getAllBalances, buildTransferOnChainPTB, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
+import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
-import { Bell, CheckCircle2, Info, Link } from "lucide-react";
-import { ConnectButton, useCurrentAccount, useSignPersonalMessage } from "@mysten/dapp-kit";
-import { useInitExecutionAdapter } from "../lib/executionAdapter";
-import { apiFetch } from "../lib/api";
+import { Bell, CheckCircle2, Info, AlertCircle } from "lucide-react";
+
 import { toast } from "sonner";
-import { isValidSuiAddress, isPendingWallet, shortenAddress } from "../lib/suiAddress";
-import { isMobileDevice, getWalletInstallUrl } from "../lib/platformDetect";
 
 interface WalletTabProps {
   user: any;
@@ -41,102 +37,16 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const [copied, setCopied] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [isRequestingGas, setIsRequestingGas] = useState(false);
-  const [walletVerified, setWalletVerified] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [firestoreWallet, setFirestoreWallet] = useState<string | null>(null);
-  const [claimingLegacy, setClaimingLegacy] = useState(false);
-  const [legacyClaimed, setLegacyClaimed] = useState(false);
 
   const chains = ["Sui"];
   const assets = ["SUI", "USDT", "USDC"];
 
-  const currentAccount = useCurrentAccount(); // UI Wallet
-  const executionAdapter = useInitExecutionAdapter();
-  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
-
-  // Load persisted wallet state from Firestore on mount
-  useEffect(() => {
-    if (!user) return;
-    const userRef = doc(db, "users", user.uid);
-    getDoc(userRef).then(snap => {
-      if (snap.exists()) {
-        const data = snap.data();
-        const savedWallet = data.suiWallet;
-        if (isValidSuiAddress(savedWallet)) {
-          setFirestoreWallet(savedWallet);
-          setWalletVerified(data.walletVerified === true);
-        }
-        if (data.legacyClaimed === true) {
-          setLegacyClaimed(true);
-        }
-      }
-    }).catch(console.error);
-  }, [user]);
-
-  // Track on-chain address: prefer connected wallet, fall back to persisted
-  useEffect(() => {
-    if (currentAccount?.address) {
-      setAddress(currentAccount.address);
-    } else if (isValidSuiAddress(firestoreWallet)) {
-      setAddress(firestoreWallet!);
-    } else {
-      setAddress("");
-    }
-  }, [currentAccount?.address, firestoreWallet]);
-
-  /**
-   * Verify wallet ownership via message signing, then persist to Firestore.
-   * This is a lightweight proof-of-ownership: the user signs a known message
-   * with their connected wallet, proving they control the private key.
-   */
-  const verifyAndLinkWallet = async () => {
-    if (!currentAccount?.address || !user) return;
-    setVerifying(true);
-    toast.loading("Please sign the verification message in your wallet...", { id: "verify-wallet" });
-    try {
-      const message = new TextEncoder().encode(
-        `Verify wallet ownership for Quantum Finance\nAccount: ${user.uid}\nAddress: ${currentAccount.address}\nTimestamp: ${Date.now()}`
-      );
-
-      await signPersonalMessage({ message });
-
-      // Signature succeeded ΓÇö persist wallet to Firestore
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        suiWallet: currentAccount.address,
-        walletVerified: true,
-        walletLinkedAt: new Date().toISOString(),
-      });
-
-      setFirestoreWallet(currentAccount.address);
-      setWalletVerified(true);
-      toast.success("Wallet verified and linked successfully!", { id: "verify-wallet" });
-
-      // Log the action
-      await setDoc(doc(collection(db, "notifications")), {
-        uid: user.uid,
-        type: "WALLET_LINKED",
-        title: "Wallet Linked",
-        message: `Wallet ${shortenAddress(currentAccount.address)} verified and linked to your account.`,
-        timestamp: new Date().toISOString(),
-        read: false,
-      });
-    } catch (e: any) {
-      console.error("Wallet verification failed:", e);
-      if (e.message?.includes("rejected") || e.message?.includes("denied")) {
-        toast.error("Verification cancelled. You can verify later from the wallet tab.", { id: "verify-wallet" });
-      } else {
-        toast.error("Wallet verification failed: " + (e.message || "Unknown error"), { id: "verify-wallet" });
-      }
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  // General initial load: Fetch DB wallet & on-chain balances
   useEffect(() => {
     if (user) {
-      refreshBalances(currentAccount?.address || "");
+      const keypair = deriveSuiWallet(user.uid);
+      const addr = keypair.toSuiAddress();
+      setAddress(addr);
+      refreshBalances(addr);
 
       // Listen for notifications
       const q = query(
@@ -150,7 +60,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       });
       return () => unsubscribe();
     }
-  }, [user, currentAccount?.address]);
+  }, [user]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(address);
@@ -176,13 +86,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const refreshBalances = async (addr: string) => {
     setLoading(true);
     try {
-      let sui = 0, usdt = 0, usdc = 0;
-      if (addr) {
-        const onchain = await getAllBalances(addr);
-        sui = onchain.sui; 
-        usdt = onchain.usdt; 
-        usdc = onchain.usdc;
-      }
+      const { sui, usdt, usdc } = await getAllBalances(addr);
       
       // Fetch Firestore wallet balance
       const userRef = doc(db, "users", user.uid);
@@ -202,27 +106,19 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     setSending(true);
     toast.loading("Sending transaction...", { id: "send" });
     try {
-      
-
+      const keypair = deriveSuiWallet(user.uid);
       let coinType = USDT_TYPE;
       if (sendParams.asset === "SUI") coinType = SUI_TYPE;
       if (sendParams.asset === "USDC") coinType = USDC_TYPE;
 
-      // Handle Cross Chain Routing (currently mocked as Sui-to-Sui direct transfer)
-      if (sendParams.chain !== "Sui") {
-        throw new Error(`Cross-chain transfer to ${sendParams.chain} is not supported in this version. Only Sui-to-Sui transfers are currently active.`);
-      }
-
-      const senderAddress = currentAccount?.address;
-      if (!senderAddress) throw new Error("Wallet not connected");
-      const tx = await buildTransferOnChainPTB({
-        senderAddress,
-        to: sendParams.recipient,
+      const result = await crossChainTransfer({
+        signer: keypair,
+        fromAddress: address,
+        toAddress: sendParams.recipient,
         amount: parseFloat(sendParams.amount),
+        destinationChain: sendParams.chain,
         coinType: coinType
       });
-      const result = await executionAdapter.executeTransaction(tx);
-      
       console.log("Transfer successful:", result);
       
       // Add notification
@@ -249,48 +145,39 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   };
 
   const handleDeposit = async () => {
+    if (balances.usdt <= 0 && balances.usdc <= 0) {
+      toast.error("No USDT or USDC found on-chain to deposit.");
+      return;
+    }
+    
     setToppingUp(true);
-    toast.loading("Verifying execution balances...", { id: "deposit" });
+    toast.loading("Processing deposit...", { id: "deposit" });
     try {
+      const keypair = deriveSuiWallet(user.uid);
       
-      
-      if (!currentAccount?.address) throw new Error("Wallet not connected");
-      // Execute from the execution wallet as the single source of truth
-      const execBalances = await getAllBalances(currentAccount.address);
-      
-      const usdtAmount = execBalances.usdt;
-      const usdcAmount = execBalances.usdc;
+      // Deposit both if available
+      const usdtAmount = balances.usdt;
+      const usdcAmount = balances.usdc;
       const totalAmount = usdtAmount + usdcAmount;
-      
-      if (totalAmount <= 0) {
-        toast.error(`No USDT or USDC found on execution wallet to deposit.`, { id: "deposit" });
-        return;
-      }
-
-      toast.loading("Processing deposit...", { id: "deposit" });
       
       if (usdtAmount > 0) {
         console.log(`Depositing ${usdtAmount} USDT from on-chain...`);
-        const senderAddress = currentAccount?.address; if (!senderAddress) throw new Error('Wallet not connected');
-        const tx = await buildTransferOnChainPTB({
-          senderAddress,
+        await transferOnChain({
+          signer: keypair,
           to: SUI_TREASURY_ADDRESS,
           amount: usdtAmount,
           coinType: USDT_TYPE
         });
-        await executionAdapter.executeTransaction(tx);
       }
       
       if (usdcAmount > 0) {
         console.log(`Depositing ${usdcAmount} USDC from on-chain...`);
-        const senderAddress = currentAccount?.address; if (!senderAddress) throw new Error('Wallet not connected');
-        const tx = await buildTransferOnChainPTB({
-          senderAddress,
+        await transferOnChain({
+          signer: keypair,
           to: SUI_TREASURY_ADDRESS,
           amount: usdcAmount,
           coinType: USDC_TYPE
         });
-        await executionAdapter.executeTransaction(tx);
       }
       
       // 2. Update Firestore wallet balance
@@ -333,38 +220,42 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       return;
     }
 
-    // Determine destination: explicit input takes priority, then connected wallet
-    const destinationAddress = withdrawParams.externalAddress.trim() || currentAccount?.address || "";
-
-    if (!isValidSuiAddress(destinationAddress)) {
-      toast.error("Invalid Sui address. Please enter a valid 0x... address or connect your wallet.");
-      return;
-    }
-
     setWithdrawing(true);
     toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
-      // apiFetch automatically attaches the Firebase ID token
-      const result = await apiFetch<{ success: boolean; txHash: string; newWalletBalance: number }>(
-        "/api/wallet/withdraw",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            uid: user.uid,
-            amount,
-            asset: withdrawParams.asset,
-            walletAddress: destinationAddress,
-          }),
-        }
-      );
+      const idToken = await user.getIdToken();
+      const response = await fetch("/api/wallet/withdraw", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          uid: user.uid,
+          amount,
+          asset: withdrawParams.asset,
+          walletAddress: withdrawParams.externalAddress || address
+        })
+      });
 
+      if (!response.ok) {
+        const text = await response.text();
+        console.error("Withdrawal API error:", text);
+        try {
+          const errorData = JSON.parse(text);
+          throw new Error(errorData.error || `Server error: ${response.status}`);
+        } catch (e) {
+          throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
+        }
+      }
+
+      const result = await response.json();
       if (result.success) {
-        toast.success(`Successfully withdrawn ${amount} ${withdrawParams.asset} to ${shortenAddress(destinationAddress)}.`, { id: "withdraw" });
+        toast.success(`Successfully withdrawn ${amount} ${withdrawParams.asset} to your on-chain wallet.`, { id: "withdraw" });
         setShowWithdrawModal(false);
-        setWithdrawParams({ amount: "", asset: "USDT", externalAddress: "" });
         refreshBalances(address);
       } else {
-        throw new Error("Withdrawal failed");
+        throw new Error(result.error || "Withdrawal failed");
       }
     } catch (e: any) {
       console.error("Withdrawal failed:", e);
@@ -374,107 +265,8 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     }
   };
 
-  
-
   return (
     <div className="space-y-4 md:space-y-6 pb-20 md:pb-0">
-      {/* Wallet Connection & Verification */}
-      <div className={`bg-[#0a0a0a] border rounded-xl md:rounded-3xl p-4 flex flex-col gap-4 shadow-2xl relative overflow-hidden ${
-        walletVerified ? "border-green-500/30" : currentAccount ? "border-orange-500/30" : "border-blue-500/30"
-      }`}>
-        <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
-          <Link size={120} className={walletVerified ? "text-green-500" : "text-blue-500"} />
-        </div>
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex-1 z-10 text-center md:text-left">
-            <h3 className={`text-lg font-bold mb-1 flex items-center justify-center md:justify-start gap-2 ${
-              walletVerified ? "text-green-400" : "text-blue-400"
-            }`}>
-              {walletVerified ? <ShieldCheck size={18} /> : <Link size={18} />}
-              {walletVerified ? "Wallet Verified & Linked" : "Connect Your Wallet"}
-            </h3>
-            <p className="text-xs text-white/50 max-w-sm mx-auto md:mx-0">
-              {walletVerified
-                ? `Your wallet ${shortenAddress(firestoreWallet || "")} is verified and linked to your Quantum account.`
-                : currentAccount
-                  ? "Wallet connected! Please verify ownership to link it to your account."
-                  : "Connect your Sui wallet to access on-chain features, deposits, and withdrawals."
-              }
-            </p>
-          </div>
-          <div className="z-10 flex flex-col items-center md:items-end gap-2 shrink-0">
-            <ConnectButton className="!bg-blue-600 hover:!bg-blue-500 !text-white !rounded-xl !transition-all !border-none !py-2.5" />
-            {currentAccount && !walletVerified && (
-              <button
-                onClick={verifyAndLinkWallet}
-                disabled={verifying}
-                className="bg-orange-500 text-black font-bold px-4 py-2 rounded-xl text-xs hover:scale-105 transition-all disabled:opacity-50 flex items-center gap-2"
-              >
-                <ShieldCheck size={14} />
-                {verifying ? "Signing..." : "Verify & Link Wallet"}
-              </button>
-            )}
-            {currentAccount && walletVerified && currentAccount.address === firestoreWallet && (
-              <div className="flex items-center gap-2 text-xs mt-1">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse hidden md:block"></span>
-                <span className="text-green-400 font-mono bg-green-400/10 px-2 py-0.5 rounded-full border border-green-400/20">
-                  Γ£ô Verified: {shortenAddress(currentAccount.address)}
-                </span>
-              </div>
-            )}
-            {currentAccount && walletVerified && currentAccount.address !== firestoreWallet && (
-              <div className="flex flex-col items-center md:items-end gap-1">
-                <span className="text-[10px] text-orange-400">Different wallet detected. Re-verify to update.</span>
-                <button
-                  onClick={verifyAndLinkWallet}
-                  disabled={verifying}
-                  className="bg-orange-500/20 text-orange-400 font-bold px-3 py-1.5 rounded-lg text-[10px] hover:bg-orange-500/30 transition-all disabled:opacity-50"
-                >
-                  {verifying ? "Signing..." : "Re-verify & Update"}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Prompt for unverified connected wallets */}
-        {currentAccount && !walletVerified && (
-          <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-3 flex items-start gap-2 z-10">
-            <AlertTriangle size={14} className="text-orange-400 shrink-0 mt-0.5" />
-            <p className="text-[10px] md:text-xs text-orange-200/80">
-              <span className="font-bold text-orange-400">Action required:</span> Sign a message to verify you own this wallet. This links it to your Quantum account for withdrawals and deposits.
-            </p>
-          </div>
-        )}
-
-        {/* Mobile / Desktop wallet install guidance ΓÇö shown when no wallet is connected */}
-        {!currentAccount && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-3 z-10">
-            <div className="flex items-center gap-2 mb-2">
-              {isMobileDevice() ? <Smartphone size={14} className="text-blue-400" /> : <Monitor size={14} className="text-blue-400" />}
-              <span className="text-[10px] md:text-xs font-bold text-white/60">
-                {isMobileDevice() ? "Mobile Wallet" : "Desktop Wallet"}
-              </span>
-            </div>
-            <p className="text-[10px] text-white/40 mb-2">
-              {isMobileDevice()
-                ? "Open this page from your Slush (Sui Wallet) app's built-in browser to connect. Tap the browser icon inside the Slush app, then navigate to this URL."
-                : "Install a Sui wallet browser extension to connect. Sui Wallet, Slush, Suiet, and Ethos are supported."
-              }
-            </p>
-            <a
-              href={getWalletInstallUrl().url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 bg-blue-600/20 text-blue-400 font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-blue-600/30 transition-all"
-            >
-              <ExternalLink size={12} />
-              {getWalletInstallUrl().label}
-            </a>
-          </div>
-        )}
-      </div>
-
       {/* Profile & Wallet Card */}
       <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-8 flex flex-col md:flex-row items-center gap-4 md:gap-8 shadow-2xl overflow-hidden relative">
         <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -491,33 +283,14 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         </div>
         <div className="flex-1 text-center md:text-left min-w-0 z-10">
           <h2 className="text-xl md:text-3xl font-bold tracking-tight mb-1 md:mb-2 truncate">{user?.displayName || "Quantum Explorer"}</h2>
-          <div className="flex flex-col items-center justify-center md:justify-start gap-1 text-white/40">
-            <div className="flex items-center gap-2">
-              <span className="text-[9px] md:text-xs font-mono bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10 truncate max-w-[150px] md:max-w-[200px]">
-                {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : "No wallet"}
-              </span>
-              {address && (
-                <button onClick={handleCopy} className="hover:text-orange-500 transition-colors shrink-0 p-1 relative">
-                  {copied ? <ShieldCheck size={12} className="text-green-500" /> : <Copy size={12} className="md:w-3.5 md:h-3.5" />}
-                  {copied && <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-green-500 text-black text-[8px] px-2 py-1 rounded font-bold">COPIED</span>}
-                </button>
-              )}
-            </div>
-            {walletVerified && (
-              <span className="text-[8px] md:text-[10px] text-green-400/70 block mt-1 flex items-center gap-1">
-                <ShieldCheck size={10} /> Wallet verified
-              </span>
-            )}
-            {!walletVerified && currentAccount && (
-              <span className="text-[8px] md:text-[10px] text-orange-500/70 block mt-1">
-                Wallet connected ΓÇö verification pending
-              </span>
-            )}
-            {!currentAccount && !walletVerified && (
-              <span className="text-[8px] md:text-[10px] text-white/30 block mt-1">
-                Connect a wallet to get started
-              </span>
-            )}
+          <div className="flex items-center justify-center md:justify-start gap-2 text-white/40">
+            <span className="text-[9px] md:text-xs font-mono bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10 truncate max-w-[150px] md:max-w-[200px]">
+              {address.slice(0, 6)}...{address.slice(-6)}
+            </span>
+            <button onClick={handleCopy} className="hover:text-orange-500 transition-colors shrink-0 p-1 relative">
+              {copied ? <ShieldCheck size={12} className="text-green-500" /> : <Copy size={12} className="md:w-3.5 md:h-3.5" />}
+              {copied && <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-green-500 text-black text-[8px] px-2 py-1 rounded font-bold">COPIED</span>}
+            </button>
           </div>
         </div>
         <div className="flex gap-2 md:gap-3 w-full md:w-auto z-10">
@@ -604,7 +377,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <button 
             onClick={handleDeposit}
-            disabled={toppingUp}
+            disabled={toppingUp || (balances.usdt <= 0 && balances.usdc <= 0)}
             className="mt-3 md:mt-4 w-full bg-orange-500/10 border border-orange-500/20 text-orange-500 font-bold py-2 rounded-lg md:rounded-xl hover:bg-orange-500/20 transition-all flex items-center justify-center gap-2 text-[10px] md:text-xs disabled:opacity-50"
           >
             <Plus size={14} />
@@ -620,85 +393,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </button>
         </div>
       </div>
-
-      {/* Legacy Balance Migration Banner */}
-      {balances.wallet > 0 && walletVerified && !legacyClaimed && (
-        <div className="bg-gradient-to-r from-purple-500/10 via-blue-500/10 to-purple-500/10 border border-purple-500/30 rounded-xl md:rounded-3xl p-4 md:p-6 relative overflow-hidden shadow-xl">
-          <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
-            <RefreshCw size={100} className="text-purple-500" />
-          </div>
-          <div className="flex flex-col md:flex-row items-start md:items-center gap-4 z-10 relative">
-            <div className="flex-1">
-              <h3 className="text-base md:text-lg font-bold text-purple-300 mb-1 flex items-center gap-2">
-                <RefreshCw size={18} className="text-purple-400" />
-                Claim Your Legacy Balance
-              </h3>
-              <p className="text-[10px] md:text-xs text-white/50 mb-2">
-                You have <span className="font-bold text-purple-300">{balances.wallet.toFixed(2)} USD</span> from before our Web3 migration.
-                Claim it to your verified wallet as USDC. This is a one-time transfer.
-              </p>
-              <div className="flex items-center gap-2 text-[9px] text-white/30">
-                <ShieldCheck size={10} className="text-green-400" />
-                <span>Destination: {shortenAddress(firestoreWallet || "")} (Verified)</span>
-              </div>
-            </div>
-            <button
-              onClick={async () => {
-                if (!user || claimingLegacy) return;
-                setClaimingLegacy(true);
-                toast.loading("Processing legacy balance claim...", { id: "claim-legacy" });
-                try {
-                  const result = await apiFetch<{ success: boolean; claimedAmount: number; txHash: string | null }>(
-                    "/api/wallet/claim-legacy",
-                    { method: "POST", body: JSON.stringify({ uid: user.uid }) }
-                  );
-                  if (result.success) {
-                    toast.success(
-                      `Successfully claimed ${result.claimedAmount?.toFixed(2)} USDC!${
-                        result.txHash ? ` TX: ${result.txHash.slice(0, 12)}...` : ""
-                      }`,
-                      { id: "claim-legacy" }
-                    );
-                    setLegacyClaimed(true);
-                    refreshBalances(address);
-                  }
-                } catch (e: any) {
-                  console.error("Legacy claim failed:", e);
-                  toast.error("Claim failed: " + (e.message || "Unknown error"), { id: "claim-legacy" });
-                } finally {
-                  setClaimingLegacy(false);
-                }
-              }}
-              disabled={claimingLegacy}
-              className="bg-purple-500 text-white font-bold px-5 py-3 rounded-xl text-xs md:text-sm hover:scale-105 transition-all disabled:opacity-50 flex items-center gap-2 shrink-0 shadow-lg shadow-purple-500/20"
-            >
-              <ArrowDownLeft size={16} />
-              {claimingLegacy ? "Claiming..." : "Claim to Wallet"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Legacy claimed success state */}
-      {legacyClaimed && (
-        <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 flex items-center gap-3">
-          <CheckCircle2 size={16} className="text-green-400 shrink-0" />
-          <p className="text-[10px] md:text-xs text-green-300">
-            Your legacy balance has been successfully claimed and sent to your verified wallet.
-          </p>
-        </div>
-      )}
-
-      {/* Legacy balance exists but wallet not verified */}
-      {balances.wallet > 0 && !walletVerified && !legacyClaimed && (
-        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 flex items-start gap-2">
-          <AlertTriangle size={14} className="text-yellow-400 shrink-0 mt-0.5" />
-          <p className="text-[10px] md:text-xs text-yellow-200/80">
-            You have a legacy balance of <span className="font-bold">{balances.wallet.toFixed(2)} USD</span>.
-            Connect and verify your wallet to claim it.
-          </p>
-        </div>
-      )}
 
       {/* Notifications Section */}
       <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden group shadow-xl">
@@ -873,33 +567,16 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       )}
 
       {/* Withdraw Modal */}
-      {showWithdrawModal && (() => {
-        const resolvedAddress = withdrawParams.externalAddress.trim() || currentAccount?.address || "";
-        const addressIsValid = isValidSuiAddress(resolvedAddress);
-        const hasTypedAddress = withdrawParams.externalAddress.trim().length > 0;
-        const typedAddressInvalid = hasTypedAddress && !isValidSuiAddress(withdrawParams.externalAddress.trim());
-        const canSubmit = addressIsValid && !withdrawing && !!withdrawParams.amount && parseFloat(withdrawParams.amount) > 0;
-
-        return (
+      {showWithdrawModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-4 bg-black/90 backdrop-blur-md">
           <motion.div
             initial={{ scale: 0.9, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
-            className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-5 md:p-8 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto scrollbar-hide"
+            className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-5 md:p-8 w-full max-w-md shadow-2xl"
           >
             <h3 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">Withdraw to On-chain</h3>
             
             <div className="space-y-4">
-              {/* No wallet connected warning */}
-              {!currentAccount && !hasTypedAddress && (
-                <div className="bg-red-500/10 border border-red-500/20 p-3 rounded-xl flex items-start gap-2">
-                  <AlertTriangle size={16} className="text-red-400 shrink-0 mt-0.5" />
-                  <p className="text-[10px] md:text-xs text-red-300">
-                    No wallet connected. Please connect your wallet first or enter a destination address below.
-                  </p>
-                </div>
-              )}
-
               <div>
                 <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Asset</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -940,25 +617,15 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
               </div>
 
               <div>
-                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Destination Wallet Address</label>
+                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">Destination Address (Optional)</label>
                 <input
                   type="text"
-                  placeholder={currentAccount?.address ? `Using connected: ${shortenAddress(currentAccount.address)}` : "Enter a Sui wallet address (0x...)"}
+                  placeholder="Leave empty for internal wallet"
                   value={withdrawParams.externalAddress}
                   onChange={(e) => setWithdrawParams({ ...withdrawParams, externalAddress: e.target.value })}
-                  className={`w-full bg-white/5 border rounded-lg md:rounded-xl px-3 md:px-4 py-2.5 md:py-3 focus:outline-none transition-all font-mono text-[10px] md:text-sm ${
-                    typedAddressInvalid ? "border-red-500/50 focus:border-red-500" : "border-white/10 focus:border-orange-500"
-                  }`}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg md:rounded-xl px-3 md:px-4 py-2.5 md:py-3 focus:outline-none focus:border-orange-500 transition-all font-mono text-[10px] md:text-sm"
                 />
-                {typedAddressInvalid && (
-                  <p className="mt-1 text-[10px] text-red-400">Invalid Sui address format. Must start with 0x and be 66 characters.</p>
-                )}
-                {!hasTypedAddress && currentAccount?.address && (
-                  <p className="mt-1 text-[10px] text-green-400/60">Γ£ô Will send to your connected wallet: {shortenAddress(currentAccount.address)}</p>
-                )}
-                {!hasTypedAddress && !currentAccount?.address && (
-                  <p className="mt-1 text-[10px] text-red-400/80">Connect a wallet or enter a destination address above.</p>
-                )}
+                <p className="mt-1 text-[8px] text-white/20">If empty, funds will be sent to your internal address: {address.slice(0, 8)}...</p>
               </div>
 
               <div className="bg-orange-500/10 border border-orange-500/20 p-3 md:p-4 rounded-xl md:rounded-2xl space-y-1 md:space-y-2">
@@ -968,32 +635,29 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
                 </div>
                 <div className="flex justify-between text-[9px] md:text-xs">
                   <span className="text-white/40">Destination</span>
-                  <span className={`font-bold font-mono ${addressIsValid ? "text-green-400" : "text-red-400"}`}>
-                    {addressIsValid ? shortenAddress(resolvedAddress, 8, 6) : "No valid address"}
-                  </span>
+                  <span className="font-bold font-mono">{(withdrawParams.externalAddress || address).slice(0, 6)}...{(withdrawParams.externalAddress || address).slice(-6)}</span>
                 </div>
               </div>
 
               <div className="flex gap-2 md:gap-3 pt-2">
                 <button
-                  onClick={() => { setShowWithdrawModal(false); setWithdrawParams({ amount: "", asset: "USDT", externalAddress: "" }); }}
+                  onClick={() => setShowWithdrawModal(false)}
                   className="flex-1 bg-white/5 border border-white/10 py-3 md:py-4 rounded-lg md:rounded-2xl font-bold text-xs md:text-base hover:bg-white/10 transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleWithdraw}
-                  disabled={!canSubmit}
-                  className="flex-1 bg-orange-500 text-black py-3 md:py-4 rounded-lg md:rounded-2xl font-bold text-xs md:text-base hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={withdrawing || !withdrawParams.amount || parseFloat(withdrawParams.amount) <= 0}
+                  className="flex-1 bg-orange-500 text-black py-3 md:py-4 rounded-lg md:rounded-2xl font-bold text-xs md:text-base hover:scale-[1.02] transition-all disabled:opacity-50"
                 >
-                  {withdrawing ? "Processing..." : !addressIsValid ? "Wallet Required" : "Confirm Withdrawal"}
+                  {withdrawing ? "Processing..." : "Confirm Withdrawal"}
                 </button>
               </div>
             </div>
           </motion.div>
         </div>
-      );
-      })()}
+      )}
 
       {/* Receive Modal */}
       {showReceiveModal && (
@@ -1042,7 +706,3 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
 };
 
 export default WalletTab;
-
-
-
-

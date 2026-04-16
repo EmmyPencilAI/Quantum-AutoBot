@@ -3,7 +3,7 @@ import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 // Connect to Sui Devnet or Testnet
-export const suiClient = new SuiClient({ url: getFullnodeUrl("testnet") } as any);
+export const suiClient = new SuiClient({ url: getFullnodeUrl("testnet"), network: "testnet" as any });
 
 export const SUI_CONTRACT_ADDRESS = import.meta.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
 export const SUI_TREASURY_ADDRESS = import.meta.env.VITE_SUI_TREASURY_ADDRESS || "0x40e4e861562d786bbdc68e2ace97b579a6022e8a1d9bad850112138c301e0e41";
@@ -13,15 +13,15 @@ export const USDT_TYPE = "0x5d4b302306649423527773c6827317e943975d607a097e16f209
 // USDC on Sui Testnet (Common ID)
 export const USDC_TYPE = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC";
 export const SUI_TYPE = "0x2::sui::SUI";
-export const SUI_TYPE_ALT = "0x2::sui::SUI";
 
 // Platform Fee Configuration
-export const PLATFORM_FEE_PERCENT = 0.001; // 0.1%
+export const PLATFORM_FEE_PERCENT = 0.001; // 0.1% - "cheap" but collected
 
 /**
  * Simplified zkLogin wallet derivation for the AI Studio environment.
  */
 export function deriveSuiWallet(uid: string): Ed25519Keypair {
+  // Use a deterministic seed from the UID
   const encoder = new TextEncoder();
   const seed = encoder.encode(uid.padEnd(32, "0")).slice(0, 32);
   return Ed25519Keypair.fromSecretKey(seed);
@@ -35,13 +35,21 @@ export async function requestTestnetGas(address: string) {
     console.log(`Requesting gas for ${address} on Sui Testnet...`);
     const response = await fetch("https://faucet.testnet.sui.io/gas", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ FixedAmountRequest: { recipient: address } }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        FixedAmountRequest: {
+          recipient: address,
+        },
+      }),
     });
+
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Faucet request failed: ${errorText}`);
     }
+
     return await response.json();
   } catch (error) {
     console.error("Error requesting gas:", error);
@@ -52,7 +60,7 @@ export async function requestTestnetGas(address: string) {
 export async function getSuiBalance(address: string) {
   try {
     const balance = await suiClient.getBalance({ owner: address });
-    return Number(balance.totalBalance) / 1e9;
+    return Number(balance.totalBalance) / 1e9; // Convert from Mist to SUI
   } catch (e) {
     console.error("Error fetching SUI balance:", e);
     return 0;
@@ -62,7 +70,7 @@ export async function getSuiBalance(address: string) {
 export async function getUsdtBalance(address: string) {
   try {
     const balance = await suiClient.getBalance({ owner: address, coinType: USDT_TYPE });
-    return Number(balance.totalBalance) / 1e6;
+    return Number(balance.totalBalance) / 1e6; // USDT usually has 6 decimals
   } catch (e) {
     console.error("Error fetching USDT balance:", e);
     return 0;
@@ -72,7 +80,7 @@ export async function getUsdtBalance(address: string) {
 export async function getUsdcBalance(address: string) {
   try {
     const balance = await suiClient.getBalance({ owner: address, coinType: USDC_TYPE });
-    return Number(balance.totalBalance) / 1e6;
+    return Number(balance.totalBalance) / 1e6; // USDC usually has 6 decimals
   } catch (e) {
     console.error("Error fetching USDC balance:", e);
     return 0;
@@ -88,6 +96,8 @@ export async function getAllBalances(address: string) {
   return { sui, usdt, usdc };
 }
 
+export const SUI_TYPE_ALT = "0x2::sui::SUI";
+
 export async function getDecimals(coinType: string): Promise<number> {
   if (coinType === SUI_TYPE || coinType === SUI_TYPE_ALT || coinType.includes("sui::SUI")) return 9;
   try {
@@ -95,105 +105,14 @@ export async function getDecimals(coinType: string): Promise<number> {
     return metadata?.decimals ?? 6;
   } catch (e) {
     console.error("Error fetching coin metadata:", e);
+    // Common defaults
     if (coinType === USDT_TYPE || coinType === USDC_TYPE) return 6;
-    return 9;
+    return 9; 
   }
 }
 
-// ─── PTB Builders (used by WalletTab with dapp-kit signing) ─────────────────
-
 /**
- * Builds a PTB for on-chain transfer (used with dapp-kit wallet signing)
- */
-export async function buildTransferOnChainPTB(params: {
-  senderAddress: string;
-  to: string;
-  amount: number;
-  coinType?: string;
-}): Promise<Transaction> {
-  const { senderAddress, to, amount, coinType = SUI_TYPE } = params;
-  const txb = new Transaction();
-  const decimals = await getDecimals(coinType);
-
-  const feePercent = to === SUI_TREASURY_ADDRESS ? 0 : PLATFORM_FEE_PERCENT;
-  const feeAmount = amount * feePercent;
-  const netAmount = amount - feeAmount;
-
-  const rawNetAmount = Math.floor(netAmount * Math.pow(10, decimals));
-  const rawFeeAmount = Math.floor(feeAmount * Math.pow(10, decimals));
-
-  if (rawNetAmount <= 0) throw new Error("Amount too small after fees");
-
-  if (coinType === SUI_TYPE || coinType === SUI_TYPE_ALT || coinType.includes("sui::SUI")) {
-    if (rawFeeAmount > 0) {
-      const [feeCoin] = txb.splitCoins(txb.gas, [rawFeeAmount]);
-      txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
-    }
-    const [mainCoin] = txb.splitCoins(txb.gas, [rawNetAmount]);
-    txb.transferObjects([mainCoin], to);
-  } else {
-    const coins = await suiClient.getCoins({ owner: senderAddress, coinType });
-    if (coins.data.length === 0) throw new Error(`No coins found for type: ${coinType}`);
-
-    const totalBalance = coins.data.reduce((sum, c) => sum + BigInt(c.balance), BigInt(0));
-    const totalNeeded = BigInt(rawNetAmount) + BigInt(rawFeeAmount);
-    if (totalBalance < totalNeeded) {
-      throw new Error(`Insufficient balance. Have ${Number(totalBalance) / Math.pow(10, decimals)}, need ${amount}`);
-    }
-
-    const coinObjectIds = coins.data.map((c) => c.coinObjectId);
-    const primaryCoin = coinObjectIds[0];
-    const rest = coinObjectIds.slice(1);
-    if (rest.length > 0) {
-      txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
-    }
-    if (rawFeeAmount > 0) {
-      const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
-      txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
-    }
-    const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
-    txb.transferObjects([mainCoin], to);
-  }
-
-  txb.setGasBudget(10000000);
-  return txb;
-}
-
-export async function buildStartSessionPTB(params: { amount: number }): Promise<Transaction> {
-  const txb = new Transaction();
-  const rawAmount = Math.floor(params.amount * 1e9);
-
-  const [coin] = txb.splitCoins(txb.gas, [rawAmount]);
-  txb.moveCall({
-    target: `${SUI_CONTRACT_ADDRESS}::trading::start_session`,
-    arguments: [
-      txb.object(coin),
-      txb.pure.u64(rawAmount),
-      txb.pure.u64(Date.now()),
-    ],
-  });
-
-  txb.setGasBudget(10000000);
-  return txb;
-}
-
-export function buildWithdrawSessionPTB(sessionId: string): Transaction {
-  const txb = new Transaction();
-  txb.moveCall({
-    target: `${SUI_CONTRACT_ADDRESS}::trading::withdraw_session`,
-    arguments: [
-      txb.object(sessionId),
-      txb.object(SUI_TREASURY_ADDRESS),
-    ],
-  });
-  txb.setGasBudget(10000000);
-  return txb;
-}
-
-// ─── Direct Transfer (used by TradingTab with deriveSuiWallet signing) ──────
-
-/**
- * Direct on-chain transfer using a keypair signer
+ * Real on-chain transfer for USDT or SUI with platform fee collection
  */
 export async function transferOnChain(params: {
   signer: Ed25519Keypair;
@@ -204,16 +123,19 @@ export async function transferOnChain(params: {
   const { signer, to, amount, coinType = SUI_TYPE } = params;
   const txb = new Transaction();
   const decimals = await getDecimals(coinType);
-
+  
+  // Calculate platform fee
   const feePercent = to === SUI_TREASURY_ADDRESS ? 0 : PLATFORM_FEE_PERCENT;
   const feeAmount = amount * feePercent;
   const netAmount = amount - feeAmount;
+
   const rawNetAmount = Math.floor(netAmount * Math.pow(10, decimals));
   const rawFeeAmount = Math.floor(feeAmount * Math.pow(10, decimals));
 
   if (rawNetAmount <= 0) throw new Error("Amount too small after fees");
 
   if (coinType === SUI_TYPE || coinType === SUI_TYPE_ALT || coinType.includes("sui::SUI")) {
+    // SUI Transfer
     if (rawFeeAmount > 0) {
       const [feeCoin] = txb.splitCoins(txb.gas, [rawFeeAmount]);
       txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
@@ -221,11 +143,17 @@ export async function transferOnChain(params: {
     const [mainCoin] = txb.splitCoins(txb.gas, [rawNetAmount]);
     txb.transferObjects([mainCoin], to);
   } else {
-    const coins = await suiClient.getCoins({ owner: signer.toSuiAddress(), coinType });
+    // Token Transfer (e.g. USDT)
+    const coins = await suiClient.getCoins({
+      owner: signer.toSuiAddress(),
+      coinType: coinType,
+    });
+
     if (coins.data.length === 0) throw new Error(`No coins found for type: ${coinType}`);
 
     const totalBalance = coins.data.reduce((sum, c) => sum + BigInt(c.balance), BigInt(0));
     const totalNeeded = BigInt(rawNetAmount) + BigInt(rawFeeAmount);
+    
     if (totalBalance < totalNeeded) {
       throw new Error(`Insufficient balance. Have ${Number(totalBalance) / Math.pow(10, decimals)}, need ${amount}`);
     }
@@ -233,19 +161,28 @@ export async function transferOnChain(params: {
     const coinObjectIds = coins.data.map((c) => c.coinObjectId);
     const primaryCoin = coinObjectIds[0];
     const rest = coinObjectIds.slice(1);
+    
     if (rest.length > 0) {
       txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
     }
+
     if (rawFeeAmount > 0) {
       const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
       txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
     }
+    
     const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
     txb.transferObjects([mainCoin], to);
   }
 
-  txb.setGasBudget(10000000);
-  const result = await suiClient.signAndExecuteTransaction({ signer, transaction: txb });
+  // Set a reasonable gas budget
+  txb.setGasBudget(10000000); // 0.01 SUI
+
+  const result = await suiClient.signAndExecuteTransaction({
+    signer,
+    transaction: txb,
+  });
+
   await suiClient.waitForTransaction({ digest: result.digest });
   return result;
 }
@@ -258,9 +195,10 @@ export async function startSessionOnChain({
   amount: number;
 }): Promise<string> {
   const txb = new Transaction();
-  const rawAmount = Math.floor(amount * 1e9);
+  const rawAmount = Math.floor(amount * 1e9); // SUI has 9 decimals
 
   const [coin] = txb.splitCoins(txb.gas, [rawAmount]);
+  
   txb.moveCall({
     target: `${SUI_CONTRACT_ADDRESS}::trading::start_session`,
     arguments: [
@@ -270,13 +208,17 @@ export async function startSessionOnChain({
     ],
   });
 
-  txb.setGasBudget(10000000);
+  txb.setGasBudget(10000000); // 0.01 SUI
+
   const result = await suiClient.signAndExecuteTransaction({
     signer,
     transaction: txb,
-    options: { showObjectChanges: true },
+    options: {
+      showObjectChanges: true,
+    },
   });
 
+  // Find the TradingSession object ID in objectChanges
   const sessionObject = result.objectChanges?.find(
     (change: any) =>
       change.type === "created" &&
@@ -290,6 +232,8 @@ export async function startSessionOnChain({
   return sessionObject.objectId;
 }
 
+// Real cross-chain routing would use a bridge like Wormhole.
+// For Sui-to-Sui, we'll use a direct transfer.
 export async function crossChainTransfer(params: {
   signer: Ed25519Keypair;
   fromAddress: string;
