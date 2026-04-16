@@ -435,7 +435,7 @@ async function getDecimals(coinType: string): Promise<number> {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
   app.use(cors());
   app.use(express.json());
@@ -464,6 +464,11 @@ async function startServer() {
   app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
+  });
+
+  // Health check endpoint to verify API is running
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString(), dbConnected: !!db });
   });
 
   // Wallet Withdrawal Endpoint
@@ -562,24 +567,28 @@ async function startServer() {
         } catch (e: any) {
           console.error("Real Sui withdrawal failed:", e);
           onChainError = e.message || "Sui blockchain transaction failed";
-          
-          // Rollback Firestore if on-chain fails
-          await userRef.update({
-            walletBalance: currentWalletBalance // Rollback
-          });
-          return res.status(500).json({ error: "On-chain transfer failed. Balance rolled back." });
+          // FIX: Don't rollback - allow the DB withdrawal to succeed even if on-chain fails
+          // The on-chain transfer can be retried manually by admin
+          console.log(`On-chain failed but DB withdrawal preserved for ${uid}. Amount: ${amount}. Error: ${onChainError}`);
+          isSimulated = true; // Mark as simulated since on-chain didn't complete
         }
       }
 
       // Create notification
+      const notifTitle = onChainError ? "Withdrawal Processed (Pending On-Chain)" : "Withdrawal Successful";
+      const notifMessage = onChainError 
+        ? `Withdrawn ${amount.toFixed(2)} ${asset || 'USD'} from trading wallet. On-chain transfer pending.`
+        : `Successfully withdrawn ${amount.toFixed(2)} ${asset || 'USD'} to your on-chain wallet.`;
+
       await db.collection("notifications").add({
         uid,
         type: "WITHDRAWAL",
-        title: "Withdrawal Successful",
-        message: `Successfully withdrawn ${amount.toFixed(2)} ${asset || 'USD'} to your on-chain wallet.`,
+        title: notifTitle,
+        message: notifMessage,
         amount,
         asset: asset || 'USD',
         txHash,
+        onChainError: onChainError || null,
         timestamp: new Date().toISOString(),
         read: false
       });
@@ -589,9 +598,12 @@ async function startServer() {
         newWalletBalance,
         txHash,
         isSimulated,
-        message: isSimulated 
-          ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
-          : "Withdrawal successful."
+        onChainError: onChainError || null,
+        message: onChainError 
+          ? `Withdrawal processed. On-chain transfer pending: ${onChainError}`
+          : isSimulated 
+            ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
+            : "Withdrawal successful."
       });
     } catch (error: any) {
       console.error("Withdrawal error:", error);
@@ -647,12 +659,39 @@ async function startServer() {
         }
       });
 
+      // Track treasury commission (50% profit share)
+      if (treasuryShare > 0) {
+        const treasuryRef = db.collection("treasury").doc("balance");
+        const treasuryDoc = await treasuryRef.get();
+        const currentTreasuryBalance = treasuryDoc.exists ? (treasuryDoc.data().totalBalance || 0) : 0;
+        
+        await treasuryRef.set({
+          totalBalance: currentTreasuryBalance + treasuryShare,
+          lastUpdated: new Date().toISOString(),
+          walletAddress: SUI_TREASURY_ADDRESS
+        }, { merge: true });
+
+        await db.collection("treasury_commissions").add({
+          uid,
+          userName: userData.displayName || "Unknown",
+          amount: treasuryShare,
+          asset: tradingAsset,
+          type: "SETTLEMENT_COMMISSION",
+          userProfit: profit,
+          userShare: userProfitShare,
+          treasuryWallet: SUI_TREASURY_ADDRESS,
+          timestamp: new Date().toISOString()
+        });
+
+        console.log(`Treasury commission recorded: +${treasuryShare.toFixed(2)} ${tradingAsset} from ${userData.displayName || uid}`);
+      }
+
       // Create notification
       await db.collection("notifications").add({
         uid,
         type: "TRADE_STOPPED",
         title: "Trading Stopped",
-        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet.`,
+        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet. Platform fee: ${treasuryShare.toFixed(2)} ${tradingAsset}.`,
         amount: totalToUser,
         asset: tradingAsset,
         timestamp: new Date().toISOString(),
@@ -1101,20 +1140,26 @@ async function startServer() {
     ];
   }
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    // Already handled at the top
-  } else {
+  // Production static file serving - MUST be AFTER all API routes
+  if (process.env.NODE_ENV === "production") {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
+    // Only serve index.html for non-API GET requests (SPA fallback)
     app.get("*", (req, res) => {
+      if (req.url.startsWith('/api')) {
+        return res.status(404).json({ error: "API endpoint not found" });
+      }
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Quantum Finance Server running on http://localhost:${PORT}`);
+    console.log(`API routes registered. NODE_ENV=${process.env.NODE_ENV}`);
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("FATAL: Server failed to start:", err);
+  process.exit(1);
+});
