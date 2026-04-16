@@ -589,12 +589,41 @@ async function startServer() {
         }
       });
 
+      // Track treasury commission (50% profit share)
+      if (treasuryShare > 0) {
+        // 1. Accumulate in treasury balance document
+        const treasuryRef = db.collection("treasury").doc("balance");
+        const treasuryDoc = await treasuryRef.get();
+        const currentTreasuryBalance = treasuryDoc.exists ? (treasuryDoc.data().totalBalance || 0) : 0;
+        
+        await treasuryRef.set({
+          totalBalance: currentTreasuryBalance + treasuryShare,
+          lastUpdated: new Date().toISOString(),
+          walletAddress: SUI_TREASURY_ADDRESS
+        }, { merge: true });
+
+        // 2. Create individual commission record for audit trail
+        await db.collection("treasury_commissions").add({
+          uid,
+          userName: userData.displayName || "Unknown",
+          amount: treasuryShare,
+          asset: tradingAsset,
+          type: "SETTLEMENT_COMMISSION",
+          userProfit: profit,
+          userShare: userProfitShare,
+          treasuryWallet: SUI_TREASURY_ADDRESS,
+          timestamp: new Date().toISOString()
+        });
+
+        console.log(`Treasury commission recorded: +${treasuryShare.toFixed(2)} ${tradingAsset} from ${userData.displayName || uid}`);
+      }
+
       // Create notification
       await db.collection("notifications").add({
         uid,
         type: "TRADE_STOPPED",
         title: "Trading Stopped",
-        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet.`,
+        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet. Platform fee: ${treasuryShare.toFixed(2)} ${tradingAsset}.`,
         amount: totalToUser,
         asset: tradingAsset,
         timestamp: new Date().toISOString(),
@@ -752,12 +781,39 @@ async function startServer() {
         totalProfit: (userData.totalProfit || 0) - userProfitShare // Adjust total profit since we're withdrawing it
       });
 
+      // Track treasury commission (50% profit share)
+      if (treasuryShare > 0) {
+        const treasuryRef = db.collection("treasury").doc("balance");
+        const treasuryDoc = await treasuryRef.get();
+        const currentTreasuryBalance = treasuryDoc.exists ? (treasuryDoc.data().totalBalance || 0) : 0;
+        
+        await treasuryRef.set({
+          totalBalance: currentTreasuryBalance + treasuryShare,
+          lastUpdated: new Date().toISOString(),
+          walletAddress: SUI_TREASURY_ADDRESS
+        }, { merge: true });
+
+        await db.collection("treasury_commissions").add({
+          uid,
+          userName: userData.displayName || "Unknown",
+          amount: treasuryShare,
+          asset: tradingAsset,
+          type: "PROFIT_WITHDRAWAL_COMMISSION",
+          userProfit: profit,
+          userShare: userProfitShare,
+          treasuryWallet: SUI_TREASURY_ADDRESS,
+          timestamp: new Date().toISOString()
+        });
+
+        console.log(`Treasury commission (profit withdrawal): +${treasuryShare.toFixed(2)} ${tradingAsset} from ${userData.displayName || uid}`);
+      }
+
       // Create notification
       await db.collection("notifications").add({
         uid,
         type: "PROFIT_WITHDRAWAL",
         title: "Profit Withdrawn",
-        message: `Withdrawn ${userProfitShare.toFixed(2)} ${tradingAsset} profit to your wallet balance.`,
+        message: `Withdrawn ${userProfitShare.toFixed(2)} ${tradingAsset} profit to your wallet balance. Platform fee: ${treasuryShare.toFixed(2)} ${tradingAsset}.`,
         amount: userProfitShare,
         asset: tradingAsset,
         timestamp: new Date().toISOString(),
