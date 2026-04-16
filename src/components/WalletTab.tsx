@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets, Link, Unlink, Wallet } from "lucide-react";
+import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
 import { motion } from "motion/react";
 import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { Bell, CheckCircle2, Info, AlertCircle } from "lucide-react";
-
 import { toast } from "sonner";
+import { formatNumber } from "../lib/utils";
 
 interface WalletTabProps {
   user: any;
@@ -37,10 +37,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const [copied, setCopied] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [isRequestingGas, setIsRequestingGas] = useState(false);
-  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
-  const [showConnectModal, setShowConnectModal] = useState(false);
-  const [connectWalletAddress, setConnectWalletAddress] = useState("");
-  const [connectingWallet, setConnectingWallet] = useState(false);
 
   const chains = ["Sui"];
   const assets = ["SUI", "USDT", "USDC"];
@@ -51,14 +47,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       const addr = keypair.toSuiAddress();
       setAddress(addr);
       refreshBalances(addr);
-
-      // Load connected wallet from Firestore
-      const userRef = doc(db, "users", user.uid);
-      getDoc(userRef).then((snap) => {
-        if (snap.exists() && snap.data().connectedWallet) {
-          setConnectedWallet(snap.data().connectedWallet);
-        }
-      });
 
       // Listen for notifications
       const q = query(
@@ -73,37 +61,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       return () => unsubscribe();
     }
   }, [user]);
-
-  const connectExternalWallet = async () => {
-    if (!connectWalletAddress || !connectWalletAddress.startsWith("0x") || connectWalletAddress.length < 20) {
-      toast.error("Please enter a valid SUI wallet address (starting with 0x)");
-      return;
-    }
-    setConnectingWallet(true);
-    try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { connectedWallet: connectWalletAddress });
-      setConnectedWallet(connectWalletAddress);
-      setShowConnectModal(false);
-      setConnectWalletAddress("");
-      toast.success("External wallet connected!");
-    } catch (e: any) {
-      toast.error("Failed to connect wallet: " + e.message);
-    } finally {
-      setConnectingWallet(false);
-    }
-  };
-
-  const disconnectWallet = async () => {
-    try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { connectedWallet: null });
-      setConnectedWallet(null);
-      toast.success("External wallet disconnected.");
-    } catch (e: any) {
-      toast.error("Failed to disconnect: " + e.message);
-    }
-  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(address);
@@ -267,8 +224,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
       const idToken = await user.getIdToken();
-      const API_BASE = import.meta.env.VITE_API_URL || "";
-      const response = await fetch(`${API_BASE}/api/wallet/withdraw`, {
+      const response = await fetch("/api/wallet/withdraw", {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -311,61 +267,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
 
   return (
     <div className="space-y-4 md:space-y-6 pb-20 md:pb-0">
-      {/* ═══ Connect External Wallet Section ═══ */}
-      <div className="bg-gradient-to-r from-blue-500/5 via-purple-500/5 to-orange-500/5 border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-6 shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
-          <Wallet size={100} className="text-purple-500" />
-        </div>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 z-10 relative">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center ${connectedWallet ? 'bg-green-500/10' : 'bg-purple-500/10'}`}>
-              {connectedWallet ? <Link size={20} className="text-green-400" /> : <Wallet size={20} className="text-purple-400" />}
-            </div>
-            <div>
-              <h3 className="text-sm md:text-base font-bold">External Wallet</h3>
-              {connectedWallet ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] md:text-xs font-mono text-green-400 bg-green-400/10 px-2 py-0.5 rounded-full">
-                    {connectedWallet.slice(0, 8)}...{connectedWallet.slice(-6)}
-                  </span>
-                  <span className="text-[8px] text-green-400 font-bold uppercase">Connected</span>
-                </div>
-              ) : (
-                <p className="text-[10px] md:text-xs text-white/40">Connect your SUI wallet for direct withdrawals</p>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-2 w-full sm:w-auto">
-            {connectedWallet ? (
-              <>
-                <button
-                  onClick={() => { navigator.clipboard.writeText(connectedWallet); toast.success("Wallet address copied!"); }}
-                  className="flex-1 sm:flex-none bg-white/5 border border-white/10 text-white/60 font-bold px-4 py-2 rounded-xl flex items-center justify-center gap-1.5 hover:bg-white/10 transition-all text-xs"
-                >
-                  <Copy size={12} />
-                  <span>Copy</span>
-                </button>
-                <button
-                  onClick={disconnectWallet}
-                  className="flex-1 sm:flex-none bg-red-500/10 border border-red-500/20 text-red-400 font-bold px-4 py-2 rounded-xl flex items-center justify-center gap-1.5 hover:bg-red-500/20 transition-all text-xs"
-                >
-                  <Unlink size={12} />
-                  <span>Disconnect</span>
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={() => setShowConnectModal(true)}
-                className="flex-1 sm:flex-none bg-purple-500 text-white font-bold px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 hover:scale-[1.02] hover:bg-purple-400 transition-all text-xs md:text-sm shadow-lg shadow-purple-500/20"
-              >
-                <Link size={14} />
-                <span>Connect SUI Wallet</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Profile & Wallet Card */}
       <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-8 flex flex-col md:flex-row items-center gap-4 md:gap-8 shadow-2xl overflow-hidden relative">
         <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -419,7 +320,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">Sui Balance (Gas)</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.sui.toFixed(4)}</h3>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{formatNumber(balances.sui, 4)}</h3>
             <span className="text-orange-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">SUI</span>
           </div>
           <div className="mt-3 md:mt-6 flex flex-wrap gap-2">
@@ -445,7 +346,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">On-chain USDT</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.usdt.toFixed(2)}</h3>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{formatNumber(balances.usdt, 2)}</h3>
             <span className="text-green-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USDT</span>
           </div>
           <p className="mt-2 text-[8px] md:text-[10px] text-white/20">Available for trading top-up</p>
@@ -458,7 +359,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">On-chain USDC</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.usdc.toFixed(2)}</h3>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{formatNumber(balances.usdc, 2)}</h3>
             <span className="text-blue-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USDC</span>
           </div>
           <p className="mt-2 text-[8px] md:text-[10px] text-white/20">Available for trading top-up</p>
@@ -471,7 +372,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">Trading Wallet</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter text-orange-500">{balances.wallet.toFixed(2)}</h3>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter text-orange-500">{formatNumber(balances.wallet, 2)}</h3>
             <span className="text-white/40 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USD</span>
           </div>
           <button 
@@ -549,7 +450,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
                 </div>
                 <div className="text-right shrink-0">
                   <p className={`font-bold text-xs md:text-base ${n.amount >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {n.amount ? (n.amount >= 0 ? "+" : "") + n.amount.toFixed(2) : ""}
+                    {n.amount ? (n.amount >= 0 ? "+" : "") + formatNumber(n.amount, 2) : ""}
                   </p>
                   <p className="text-[9px] md:text-xs text-white/40">{new Date(n.timestamp).toLocaleDateString()}</p>
                 </div>
@@ -796,63 +697,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
               >
                 Close
               </button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Connect Wallet Modal */}
-      {showConnectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-4 bg-black/90 backdrop-blur-md">
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-5 md:p-8 w-full max-w-md shadow-2xl"
-          >
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 bg-purple-500/10 rounded-2xl flex items-center justify-center">
-                <Link size={24} className="text-purple-400" />
-              </div>
-              <div>
-                <h3 className="text-xl md:text-2xl font-bold">Connect SUI Wallet</h3>
-                <p className="text-xs text-white/40">Paste your external SUI wallet address</p>
-              </div>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">SUI Wallet Address</label>
-                <input
-                  type="text"
-                  placeholder="0x..."
-                  value={connectWalletAddress}
-                  onChange={(e) => setConnectWalletAddress(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-purple-500/50 transition-all font-mono text-sm"
-                />
-                <p className="mt-1.5 text-[9px] text-white/30">This address will be used as the default destination for withdrawals.</p>
-              </div>
-
-              <div className="bg-purple-500/5 border border-purple-500/20 p-3 rounded-xl">
-                <p className="text-[10px] text-purple-300/80 leading-relaxed">
-                  ⓘ Your funds remain non-custodial. Connecting a wallet simply links your on-chain address for convenient withdrawals.
-                </p>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => { setShowConnectModal(false); setConnectWalletAddress(""); }}
-                  className="flex-1 bg-white/5 border border-white/10 py-3 rounded-xl font-bold text-xs md:text-base hover:bg-white/10 transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={connectExternalWallet}
-                  disabled={connectingWallet || !connectWalletAddress}
-                  className="flex-1 bg-purple-500 text-white py-3 rounded-xl font-bold text-xs md:text-base hover:bg-purple-400 transition-all shadow-lg shadow-purple-500/20 disabled:opacity-50"
-                >
-                  {connectingWallet ? "Connecting..." : "Connect Wallet"}
-                </button>
-              </div>
             </div>
           </motion.div>
         </div>

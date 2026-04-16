@@ -38,80 +38,19 @@ if (fs.existsSync(firebaseConfigPath)) {
     const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
     
     if (!admin.apps.length) {
-      // Check for service account credentials (required for Render/production)
-      const serviceAccountEnv = process.env.GOOGLE_CREDENTIALS_JSON || process.env.FIREBASE_SERVICE_ACCOUNT;
-      
-      if (serviceAccountEnv) {
+      try {
+        // Prioritize explicit projectId from config to avoid connecting to the wrong project
+        admin.initializeApp({
+          projectId: firebaseConfig.projectId,
+        });
+        console.log(`Firebase Admin initialized with explicit projectId: ${firebaseConfig.projectId}`);
+      } catch (e) {
+        console.warn("Explicit Firebase Admin initialization failed, trying default:", e);
         try {
-          let serviceAccount: any;
-          let envType = "raw JSON";
-          
-          try {
-            serviceAccount = JSON.parse(serviceAccountEnv);
-          } catch (e1) {
-            try {
-              // Sometimes Render adds outer quotes or escapes newlines
-              const sanitized = serviceAccountEnv.replace(/^['"]|['"]$/g, '').replace(/\\n/g, '\n');
-              serviceAccount = JSON.parse(sanitized);
-              envType = "sanitized JSON";
-            } catch (e2) {
-              try {
-                // Try base64
-                serviceAccount = JSON.parse(Buffer.from(serviceAccountEnv, 'base64').toString('utf-8'));
-                envType = "base64 JSON";
-              } catch (e3) {
-                console.error("Could not parse service account JSON. First 20 chars:", serviceAccountEnv.substring(0, 20));
-                throw new Error("Invalid service account JSON format.");
-              }
-            }
-          }
-          
-          // If it parsed as a string (happens with double-escaped JSON), parse it again
-          if (typeof serviceAccount === 'string') {
-            serviceAccount = JSON.parse(serviceAccount);
-            envType = "double-parsed JSON";
-          }
-          
-          // Auto-inject missing project_id if it's a standard service account
-          if (serviceAccount.type !== 'authorized_user' && !serviceAccount.project_id && firebaseConfig.projectId) {
-            serviceAccount.project_id = firebaseConfig.projectId;
-          }
-          
-          if (serviceAccount.type === 'authorized_user') {
-            // Admin SDK cert() doesn't support 'authorized_user' (only service_account).
-            // We must use Application Default Credentials (ADC) by saving it to a temp file.
-            // Import os dynamically since we are in an ES module environment
-            const os = await import('os');
-            const tmpPath = path.join(os.tmpdir(), 'google-credentials.json');
-            fs.writeFileSync(tmpPath, JSON.stringify(serviceAccount));
-            process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
-            
-            admin.initializeApp({
-              projectId: firebaseConfig.projectId,
-            });
-            console.log(`Firebase Admin initialized successfully via ADC (authorized_user) for project: ${firebaseConfig.projectId}`);
-          } else {
-            // Standard Service Account
-            admin.initializeApp({
-              credential: admin.credential.cert(serviceAccount),
-              projectId: firebaseConfig.projectId,
-            });
-            console.log(`Firebase Admin initialized successfully with ${envType} (service_account) for project: ${firebaseConfig.projectId}`);
-          }
-        } catch (e: any) {
-          console.error("Failed to initialize with Service Account:", e.message);
-          // Fallback to projectId only
-          admin.initializeApp({ projectId: firebaseConfig.projectId });
-          console.warn("Firebase Admin initialized with projectId only (credentials may fail on Render)");
-        }
-      } else {
-        // No service account - use projectId only (works locally with gcloud auth)
-        try {
-          admin.initializeApp({ projectId: firebaseConfig.projectId });
-          console.log(`Firebase Admin initialized with projectId: ${firebaseConfig.projectId}`);
-          console.warn("WARNING: No GOOGLE_CREDENTIALS_JSON env var set. Firebase Admin may fail on production.");
-        } catch (e) {
-          console.error("Firebase Admin initialization failed:", e);
+          admin.initializeApp();
+          console.log("Firebase Admin initialized with default environment config");
+        } catch (e2) {
+          console.error("Critical: Firebase Admin initialization failed completely:", e2);
         }
       }
     }
@@ -146,7 +85,7 @@ if (fs.existsSync(firebaseConfigPath)) {
       } catch (e2: any) {
         console.error("Failed to connect to (default) database:", e2.message);
         try {
-          // 3. Try undefined
+          // 3. Try undefined (which should be the same as default but sometimes behaves differently in SDK)
           db = await tryConnect(undefined);
           console.log("Firebase Admin connected successfully to undefined (default) database");
         } catch (e3: any) {
@@ -395,8 +334,7 @@ async function processBackgroundTrades() {
         totalProfit: newTotalProfit,
         lastTradeAt: now,
         currentTrend: currentTrend,
-        currentLotSize: currentLotSize,
-        tradeCount: (userData.tradeCount || 0) + 1
+        currentLotSize: currentLotSize
       });
       
       // Trade Frequency: Targeting ~1,500 trades daily
@@ -465,6 +403,9 @@ const SUI_RPC_URL = "https://fullnode.testnet.sui.io:443";
 const SUI_TYPE = "0x2::sui::SUI";
 const SUI_CONTRACT_ADDRESS = process.env.VITE_SUI_CONTRACT_ADDRESS || "0x7ec914c89d99920f01c2a6aba892ec63bbdae74ca522f5ca4407d961a0263876";
 const SUI_TREASURY_ADDRESS = process.env.VITE_SUI_TREASURY_ADDRESS || "0x40e4e861562d786bbdc68e2ace97b579a6022e8a1d9bad850112138c301e0e41";
+const SUI_ADMIN_CAP = "0x204a5df950b7f0175db5c468b8993f162a37bbc5f6d6ff895411e3f4f298fe1a";
+const SUI_SETTLEMENT_AUTHORITY = "0x5fc5edf3447fff82c887a514ab69fe4f789c3c68cdf953ace55c11d0f5d1a99a";
+const SUI_QUANTUM_STATE = "0xccedfe5940ad04e03fa68f57a0045476900f398375fc6af9098ffb136577843d";
 
 async function findAdminCap(address: string): Promise<string | null> {
   try {
@@ -497,7 +438,7 @@ async function getDecimals(coinType: string): Promise<number> {
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+  const PORT = 3000;
 
   app.use(cors());
   app.use(express.json());
@@ -526,11 +467,6 @@ async function startServer() {
   app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
-  });
-
-  // Health check endpoint to verify API is running
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString(), dbConnected: !!db });
   });
 
   // Wallet Withdrawal Endpoint
@@ -629,28 +565,24 @@ async function startServer() {
         } catch (e: any) {
           console.error("Real Sui withdrawal failed:", e);
           onChainError = e.message || "Sui blockchain transaction failed";
-          // FIX: Don't rollback - allow the DB withdrawal to succeed even if on-chain fails
-          // The on-chain transfer can be retried manually by admin
-          console.log(`On-chain failed but DB withdrawal preserved for ${uid}. Amount: ${amount}. Error: ${onChainError}`);
-          isSimulated = true; // Mark as simulated since on-chain didn't complete
+          
+          // Rollback Firestore if on-chain fails
+          await userRef.update({
+            walletBalance: currentWalletBalance // Rollback
+          });
+          return res.status(500).json({ error: "On-chain transfer failed. Balance rolled back." });
         }
       }
 
       // Create notification
-      const notifTitle = onChainError ? "Withdrawal Processed (Pending On-Chain)" : "Withdrawal Successful";
-      const notifMessage = onChainError 
-        ? `Withdrawn ${amount.toFixed(2)} ${asset || 'USD'} from trading wallet. On-chain transfer pending.`
-        : `Successfully withdrawn ${amount.toFixed(2)} ${asset || 'USD'} to your on-chain wallet.`;
-
       await db.collection("notifications").add({
         uid,
         type: "WITHDRAWAL",
-        title: notifTitle,
-        message: notifMessage,
+        title: "Withdrawal Successful",
+        message: `Successfully withdrawn ${amount.toFixed(2)} ${asset || 'USD'} to your on-chain wallet.`,
         amount,
         asset: asset || 'USD',
         txHash,
-        onChainError: onChainError || null,
         timestamp: new Date().toISOString(),
         read: false
       });
@@ -660,12 +592,9 @@ async function startServer() {
         newWalletBalance,
         txHash,
         isSimulated,
-        onChainError: onChainError || null,
-        message: onChainError 
-          ? `Withdrawal processed. On-chain transfer pending: ${onChainError}`
-          : isSimulated 
-            ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
-            : "Withdrawal successful."
+        message: isSimulated 
+          ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
+          : "Withdrawal successful."
       });
     } catch (error: any) {
       console.error("Withdrawal error:", error);
@@ -721,39 +650,12 @@ async function startServer() {
         }
       });
 
-      // Track treasury commission (50% profit share)
-      if (treasuryShare > 0) {
-        const treasuryRef = db.collection("treasury").doc("balance");
-        const treasuryDoc = await treasuryRef.get();
-        const currentTreasuryBalance = treasuryDoc.exists ? (treasuryDoc.data().totalBalance || 0) : 0;
-        
-        await treasuryRef.set({
-          totalBalance: currentTreasuryBalance + treasuryShare,
-          lastUpdated: new Date().toISOString(),
-          walletAddress: SUI_TREASURY_ADDRESS
-        }, { merge: true });
-
-        await db.collection("treasury_commissions").add({
-          uid,
-          userName: userData.displayName || "Unknown",
-          amount: treasuryShare,
-          asset: tradingAsset,
-          type: "SETTLEMENT_COMMISSION",
-          userProfit: profit,
-          userShare: userProfitShare,
-          treasuryWallet: SUI_TREASURY_ADDRESS,
-          timestamp: new Date().toISOString()
-        });
-
-        console.log(`Treasury commission recorded: +${treasuryShare.toFixed(2)} ${tradingAsset} from ${userData.displayName || uid}`);
-      }
-
       // Create notification
       await db.collection("notifications").add({
         uid,
         type: "TRADE_STOPPED",
         title: "Trading Stopped",
-        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet. Platform fee: ${treasuryShare.toFixed(2)} ${tradingAsset}.`,
+        message: `Trading session ended. Returned ${totalToUser.toFixed(2)} ${tradingAsset} to your wallet.`,
         amount: totalToUser,
         asset: tradingAsset,
         timestamp: new Date().toISOString(),
@@ -786,22 +688,19 @@ async function startServer() {
           console.log(`Attempting REAL on-chain settlement for ${walletAddress || uid} on Sui...`);
           
           const txb = new Transaction();
-          const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+          const coinType: string = tradingAsset === "SUI" ? SUI_TYPE : (tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE);
           const decimals = await getDecimals(coinType);
           
           // If it's a contract-based SUI session, use the contract
           if (tradingAsset === "SUI" && userData.tradingSessionId) {
             console.log(`Using Move contract for SUI settlement. Session: ${userData.tradingSessionId}`);
             
-            const adminCapId = await findAdminCap(adminAddress);
-            if (!adminCapId) throw new Error("AdminCap not found for the provided private key");
-
             const rawFinalAmount = Math.floor(totalToUser * 1e9);
             
             txb.moveCall({
               target: `${SUI_CONTRACT_ADDRESS}::trading::settle_session`,
               arguments: [
-                txb.object(adminCapId),
+                txb.object(SUI_ADMIN_CAP),
                 txb.object(userData.tradingSessionId),
                 txb.pure.u64(rawFinalAmount),
                 txb.pure.u64(Date.now()),
@@ -809,50 +708,66 @@ async function startServer() {
             });
           }
 
-          // Platform Fee (0.1%)
+          // 50/50 profit split + Platform Fee
+          const userShare = totalToUser; // This already includes 50% profit + initial investment
+          
+          // Platform Fee on top (0.1%)
           const feePercent = 0.001;
-          const feeAmount = totalToUser * feePercent;
-          const netAmount = totalToUser - feeAmount;
+          const feeAmount = userShare * feePercent;
+          const netAmount = userShare - feeAmount;
           
           const rawNetAmount = Math.floor(netAmount * Math.pow(10, decimals));
           const rawFeeAmount = Math.floor(feeAmount * Math.pow(10, decimals));
+          const rawTreasuryProfitAmount = Math.floor(treasuryShare * Math.pow(10, decimals));
           
-          // Transfer the assets from Treasury back to User
-          const coins = await suiClient.getCoins({
-            owner: adminAddress,
-            coinType: coinType,
-          });
-
-          if (coins.data.length > 0) {
-            const coinObjectIds = coins.data.map((c) => c.coinObjectId);
-            const primaryCoin = coinObjectIds[0];
-            const rest = coinObjectIds.slice(1);
-            
-            if (rest.length > 0) {
-              txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
-            }
-
-            if (rawFeeAmount > 0) {
-              const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
+          // Transfer the assets from Treasury back to User and ensure treasury gets its 50% profit share
+          if (coinType === SUI_TYPE || coinType.includes("sui::SUI")) {
+            // SUI Transfer
+            if (rawFeeAmount + rawTreasuryProfitAmount > 0) {
+              const [feeCoin] = txb.splitCoins(txb.gas, [rawFeeAmount + rawTreasuryProfitAmount]);
               txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
             }
-
-            const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
+            const [mainCoin] = txb.splitCoins(txb.gas, [rawNetAmount]);
             txb.transferObjects([mainCoin], walletAddress || userData.walletAddress);
-            
+          } else {
+            // Token Transfer (USDT/USDC)
+            const coins = await suiClient.getCoins({
+              owner: adminAddress,
+              coinType: coinType,
+            });
+
+            if (coins.data.length > 0) {
+              const coinObjectIds = coins.data.map((c) => c.coinObjectId);
+              const primaryCoin = coinObjectIds[0];
+              const rest = coinObjectIds.slice(1);
+              
+              if (rest.length > 0) {
+                txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
+              }
+
+              const totalTreasuryCut = rawFeeAmount + rawTreasuryProfitAmount;
+              if (totalTreasuryCut > 0) {
+                const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [totalTreasuryCut]);
+                txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+              }
+
+              const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
+              txb.transferObjects([mainCoin], walletAddress || userData.walletAddress);
+            } else {
+              console.warn(`No ${tradingAsset} coins found in treasury pool for settlement`);
+              onChainError = `No ${tradingAsset} coins found in treasury pool`;
+            }
+          }
+
+          if (!onChainError) {
             txb.setGasBudget(20000000); // 0.02 SUI
-            
             const result = await suiClient.signAndExecuteTransaction({
               signer: keypair,
               transaction: txb,
             });
-            
             txHash = result.digest;
             await suiClient.waitForTransaction({ digest: txHash });
-            console.log(`Real Sui Settlement TX: ${txHash}`);
-          } else {
-            console.warn(`No ${tradingAsset} coins found in treasury for settlement`);
-            onChainError = `No ${tradingAsset} coins found in treasury`;
+            console.log(`Real Sui Settlement TX successful: ${txHash}`);
           }
         } catch (e: any) {
           console.error("Real Sui settlement failed:", e);
@@ -935,7 +850,7 @@ async function startServer() {
           const secretKey = decodeSuiPrivateKey(process.env.SUI_PRIVATE_KEY);
           const keypair = Ed25519Keypair.fromSecretKey(secretKey);
           const txb = new Transaction();
-          const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
+          const coinType: string = tradingAsset === "SUI" ? SUI_TYPE : (tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE);
           const decimals = await getDecimals(coinType);
           
           const rawNetAmount = Math.floor(userProfitShare * Math.pow(10, decimals));
@@ -1202,26 +1117,20 @@ async function startServer() {
     ];
   }
 
-  // Production static file serving - MUST be AFTER all API routes
-  if (process.env.NODE_ENV === "production") {
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    // Already handled at the top
+  } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    // Only serve index.html for non-API GET requests (SPA fallback)
     app.get("*", (req, res) => {
-      if (req.url.startsWith('/api')) {
-        return res.status(404).json({ error: "API endpoint not found" });
-      }
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Quantum Finance Server running on http://localhost:${PORT}`);
-    console.log(`API routes registered. NODE_ENV=${process.env.NODE_ENV}`);
   });
 }
 
-startServer().catch((err) => {
-  console.error("FATAL: Server failed to start:", err);
-  process.exit(1);
-});
+startServer();

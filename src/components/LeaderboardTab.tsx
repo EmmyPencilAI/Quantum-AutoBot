@@ -6,6 +6,8 @@ interface LeaderboardTabProps {
   user: any;
 }
 
+import { formatNumber } from "../lib/utils";
+
 const LeaderboardTab: React.FC<LeaderboardTabProps> = ({ user }) => {
   const [traders, setTraders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -14,8 +16,7 @@ const LeaderboardTab: React.FC<LeaderboardTabProps> = ({ user }) => {
   useEffect(() => {
     const fetchLeaderboard = async () => {
       try {
-        const API_BASE = import.meta.env.VITE_API_URL || "";
-        const response = await fetch(`${API_BASE}/api/leaderboard`);
+        const response = await fetch("/api/leaderboard");
         const data = await response.json();
         setTraders(data);
         
@@ -106,7 +107,7 @@ const LeaderboardTab: React.FC<LeaderboardTabProps> = ({ user }) => {
 
                     <div className="space-y-1">
                       <p className="text-2xl md:text-3xl font-bold text-green-400 tracking-tighter">
-                        +{trader.profit.toFixed(2)} <span className="text-xs opacity-60">USDT</span>
+                        +{formatNumber(trader.profit, 2)} <span className="text-xs opacity-60">USDT</span>
                       </p>
                       <div className="flex items-center justify-center gap-2 text-[10px] md:text-xs text-white/40">
                         <Activity size={12} className="text-orange-500" />
@@ -178,7 +179,7 @@ const LeaderboardTab: React.FC<LeaderboardTabProps> = ({ user }) => {
                         </td>
                         <td className="px-4 md:px-8 py-4 md:py-6 text-right">
                           <p className="font-bold text-green-400 text-xs md:text-lg">
-                            +{trader.profit.toFixed(2)} <span className="text-[10px] opacity-60">USDT</span>
+                            +{formatNumber(trader.profit, 2)} <span className="text-[10px] opacity-60">USDT</span>
                           </p>
                         </td>
                       </tr>
