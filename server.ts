@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -96,8 +96,81 @@ if (fs.existsSync(firebaseConfigPath)) {
   }
 }
 
+// Support credentials via environment variable (for Render deployment)
+if (process.env.GOOGLE_CREDENTIALS_JSON && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  try {
+    const credPath = path.join(process.cwd(), ".gcp-credentials.json");
+    fs.writeFileSync(credPath, process.env.GOOGLE_CREDENTIALS_JSON);
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
+    console.log("✅ Credentials loaded from GOOGLE_CREDENTIALS_JSON env var");
+  } catch (e: any) {
+    console.error("Failed to write credentials from env var:", e.message);
+  }
+}
+
+// Support firebase config via environment variable
+if (process.env.FIREBASE_CONFIG && !fs.existsSync(firebaseConfigPath)) {
+  try {
+    fs.writeFileSync(firebaseConfigPath, process.env.FIREBASE_CONFIG);
+    console.log("✅ Firebase config loaded from FIREBASE_CONFIG env var");
+  } catch (e: any) {
+    console.error("Failed to write firebase config from env var:", e.message);
+  }
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ─── Auth Middleware ──────────────────────────────────────────────────────────
+interface AuthRequest extends Request {
+  uid?: string;
+  userEmail?: string;
+  isAdmin?: boolean;
+}
+
+async function verifyFirebaseToken(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Unauthorized: Missing or invalid Authorization header" });
+    return;
+  }
+  const idToken = authHeader.split("Bearer ")[1];
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    req.uid = decoded.uid;
+    req.userEmail = decoded.email;
+    req.isAdmin =
+      decoded.role === "admin" ||
+      (!!process.env.ADMIN_EMAIL &&
+        decoded.email === process.env.ADMIN_EMAIL &&
+        decoded.email_verified === true);
+    next();
+  } catch (error: any) {
+    console.error("Token verification failed:", error.code || error.message);
+    res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
+  }
+}
+
+function requireSelfOrAdmin(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  const requestedUid = req.body?.uid || req.params?.uid;
+  if (!requestedUid) {
+    res.status(400).json({ error: "Missing uid in request" });
+    return;
+  }
+  if (req.uid !== requestedUid && !req.isAdmin) {
+    res.status(403).json({ error: "Forbidden: You can only access your own resources" });
+    return;
+  }
+  next();
+}
 
 // Community Bot Logic
 const BOT_MESSAGES = [
@@ -381,8 +454,8 @@ async function startServer() {
     next();
   });
 
-  // Wallet Withdrawal Endpoint
-  app.post("/api/wallet/withdraw", async (req, res) => {
+  // Wallet Withdrawal Endpoint (Auth Protected)
+  app.post("/api/wallet/withdraw", verifyFirebaseToken, requireSelfOrAdmin, async (req: AuthRequest, res: Response) => {
     if (!db) return res.status(500).json({ error: "Database not initialized" });
     const { uid, amount, asset, walletAddress } = req.body;
     if (!uid || !amount || !walletAddress) return res.status(400).json({ error: "Invalid request" });
@@ -512,7 +585,7 @@ async function startServer() {
   });
 
   // Trading Engine Simulation & Settlement
-  app.post("/api/trading/settle", async (req, res) => {
+  app.post("/api/trading/settle", verifyFirebaseToken, requireSelfOrAdmin, async (req: AuthRequest, res: Response) => {
     const { uid, walletAddress } = req.body;
     if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
 
@@ -684,7 +757,7 @@ async function startServer() {
   });
 
   // Withdraw profit without stopping trade
-  app.post("/api/trading/withdraw-profit", async (req, res) => {
+  app.post("/api/trading/withdraw-profit", verifyFirebaseToken, requireSelfOrAdmin, async (req: AuthRequest, res: Response) => {
     const { uid, walletAddress } = req.body;
     if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
 
@@ -783,7 +856,7 @@ async function startServer() {
   });
 
   // Community Comments
-  app.post("/api/community/comment", async (req, res) => {
+  app.post("/api/community/comment", verifyFirebaseToken, async (req: AuthRequest, res: Response) => {
     console.log("POST /api/community/comment", req.body);
     if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
     try {
@@ -821,7 +894,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/community/like", async (req, res) => {
+  app.post("/api/community/like", verifyFirebaseToken, async (req: AuthRequest, res: Response) => {
     console.log("POST /api/community/like", req.body);
     if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
     try {
