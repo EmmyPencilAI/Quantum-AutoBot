@@ -318,20 +318,29 @@ async function processBackgroundTrades() {
       const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
       const currentAssetBalance = userData[balanceField] || 0;
 
-      // Lot Size Logic: Start at 0.05 and grow overtime
-      let currentLotSize = userData.currentLotSize || 0.05;
-      // Grow lot size by 0.1% every update while trading
-      currentLotSize = Math.min(10.0, currentLotSize + (currentLotSize * 0.001));
+      const currentPrice = 65000 + (Math.random() * 1000 - 500);
+      const currentLeverage = userData.leverage || 100;
+      
+      // Forex Lot Size Logic
+      // 1 Standard Lot = 100,000 base units
+      // Position Value = Margin (Balance) * Leverage
+      let currentLotSize = (currentAssetBalance * currentLeverage) / 100000;
+      if (currentLotSize < 0.01) currentLotSize = 0.01; // Minimum lot size ceiling
 
-      // Randomize profit based on win rate
-      let actualProfit = 0;
+      // Randomize win based on AI strategy
       const isWin = Math.random() < winRate;
       
+      // Simulate realistic price movement (10 to 60 "pips/points")
+      const pointsMoved = (Math.random() * 50) + 10;
+      
+      // PNL = Points * LotSize * StrategyMultiplier
+      const rawProfit = pointsMoved * currentLotSize * (profitFactor * 150); 
+      
+      let actualProfit = 0;
       if (isWin) {
-        actualProfit = currentAssetBalance * profitFactor * (0.8 + Math.random() * 0.4);
+        actualProfit = rawProfit;
       } else {
-        // Loss is usually smaller than profit for these strategies
-        actualProfit = -currentAssetBalance * (profitFactor * 0.5) * (0.5 + Math.random() * 0.5);
+        actualProfit = -(rawProfit * 0.6); // mitigate catastrophic simulated loss
       }
       
       const newBalance = currentAssetBalance + actualProfit;
@@ -358,8 +367,8 @@ async function processBackgroundTrades() {
       
       if (Math.random() < tradeProbability) {
         const tradeRef = db.collection("trades").doc();
-        // Trade amount influenced by lot size
-        const tradeAmount = currentLotSize * 1000; 
+        // Trade amount is Position Value
+        const tradeAmount = currentAssetBalance * currentLeverage; 
         
         const tradeType = currentTrend === "Long" ? "BUY" : "SELL";
         
@@ -370,7 +379,7 @@ async function processBackgroundTrades() {
           amount: tradeAmount,
           lotSize: currentLotSize,
           asset: tradingAsset,
-          price: 65000 + (Math.random() * 1000 - 500),
+          price: currentPrice,
           pnl: actualProfit,
           duration: Math.floor(Math.random() * 60) + 10,
           timestamp: now,

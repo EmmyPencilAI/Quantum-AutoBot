@@ -69,7 +69,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           hour: '2-digit', 
           minute: '2-digit' 
         }),
-        value: doc.data().pnl
+        value: doc.data().price || 65000
       }));
 
       const userTrades = allTrades.filter((t: any) => t.uid === user.uid).reverse();
@@ -78,7 +78,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       if (userTrades.length > 0) {
         setHistory(userTrades);
       } else {
-        setHistory([{ time: "Start", value: 0 }]);
+        setHistory([]);
       }
 
       // Also update global activity from the same snapshot to be efficient
@@ -641,7 +641,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                 })}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
                   <XAxis dataKey="time" hide />
-                  <YAxis hide domain={["auto", "auto"]} />
+                  <YAxis hide domain={['dataMin - 50', 'dataMax + 50']} />
                   <Tooltip
                     contentStyle={{ backgroundColor: "#0a0a0a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "12px" }}
                     content={({ active, payload }) => {
@@ -651,7 +651,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                           <div className="bg-[#0a0a0a] border border-white/10 p-3 rounded-xl shadow-2xl">
                             <p className="text-[10px] font-bold text-white/40 uppercase mb-1">{data.time}</p>
                             <p className={`text-sm font-bold ${data.isUp ? "text-green-400" : "text-red-400"}`}>
-                              {data.isUp ? "UP" : "DOWN"} • {data.value.toFixed(4)} USDT
+                              PRICE: {data.value.toFixed(2)} USDT
                             </p>
                             {data.isTrade && (
                               <div className="mt-1 space-y-0.5">
@@ -705,12 +705,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             </div>
           </div>
 
-          {/* Trade Activity Feed */}
+          {/* Global Activity Feed */}
           <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-2xl">
             <div className="flex items-center justify-between mb-4 md:mb-6">
               <h3 className="text-base md:text-xl font-bold tracking-tight flex items-center gap-2">
                 <Activity size={18} className="text-orange-500 md:w-5 md:h-5" />
-                <span>Trade Activity Feed</span>
+                <span>Global Bot Network</span>
               </h3>
               <div className="text-[9px] md:text-xs text-white/40 bg-white/5 px-2 md:px-3 py-1 rounded-full border border-white/10">
                 Live Updates
