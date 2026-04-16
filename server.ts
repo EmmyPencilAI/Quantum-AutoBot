@@ -564,24 +564,28 @@ async function startServer() {
         } catch (e: any) {
           console.error("Real Sui withdrawal failed:", e);
           onChainError = e.message || "Sui blockchain transaction failed";
-          
-          // Rollback Firestore if on-chain fails
-          await userRef.update({
-            walletBalance: currentWalletBalance // Rollback
-          });
-          return res.status(500).json({ error: "On-chain transfer failed. Balance rolled back." });
+          // Don't rollback - allow the DB withdrawal to succeed even if on-chain fails
+          // The on-chain transfer can be retried manually by admin
+          console.log(`On-chain failed but DB withdrawal preserved for ${uid}. Amount: ${amount}. Error: ${onChainError}`);
+          isSimulated = true; // Mark as simulated since on-chain didn't complete
         }
       }
 
       // Create notification
+      const notifTitle = onChainError ? "Withdrawal Processed (Pending On-Chain)" : "Withdrawal Successful";
+      const notifMessage = onChainError 
+        ? `Withdrawn ${amount.toFixed(2)} ${asset || 'USD'} from trading wallet. On-chain transfer pending.`
+        : `Successfully withdrawn ${amount.toFixed(2)} ${asset || 'USD'} to your on-chain wallet.`;
+
       await db.collection("notifications").add({
         uid,
         type: "WITHDRAWAL",
-        title: "Withdrawal Successful",
-        message: `Successfully withdrawn ${amount.toFixed(2)} ${asset || 'USD'} to your on-chain wallet.`,
+        title: notifTitle,
+        message: notifMessage,
         amount,
         asset: asset || 'USD',
         txHash,
+        onChainError: onChainError || null,
         timestamp: new Date().toISOString(),
         read: false
       });
@@ -591,9 +595,12 @@ async function startServer() {
         newWalletBalance,
         txHash,
         isSimulated,
-        message: isSimulated 
-          ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
-          : "Withdrawal successful."
+        onChainError: onChainError || null,
+        message: onChainError 
+          ? `Withdrawal processed. On-chain transfer pending: ${onChainError}`
+          : isSimulated 
+            ? "Withdrawal successful (Simulated: SUI_PRIVATE_KEY not set)." 
+            : "Withdrawal successful."
       });
     } catch (error: any) {
       console.error("Withdrawal error:", error);

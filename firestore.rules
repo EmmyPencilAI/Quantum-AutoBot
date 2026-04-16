@@ -87,7 +87,19 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated(); // Allow reading other profiles for community/leaderboard
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+      // Allow partial updates - only validate ownership and ensure fields are correct types
+      allow update: if isOwner(userId) && (
+        // Validate only the fields that are actually being changed
+        (!('walletBalance' in request.resource.data) || request.resource.data.walletBalance is number) &&
+        (!('isTrading' in request.resource.data) || request.resource.data.isTrading is bool) &&
+        (!('initialInvestment' in request.resource.data) || request.resource.data.initialInvestment is number) &&
+        (!('totalProfit' in request.resource.data) || request.resource.data.totalProfit is number) &&
+        (!('activeStrategy' in request.resource.data) || request.resource.data.activeStrategy is string) &&
+        (!('activePair' in request.resource.data) || request.resource.data.activePair is string) &&
+        (!('tradingAsset' in request.resource.data) || request.resource.data.tradingAsset is string) &&
+        (!('usdtBalance' in request.resource.data) || request.resource.data.usdtBalance is number) &&
+        (!('usdcBalance' in request.resource.data) || request.resource.data.usdcBalance is number)
+      );
     }
 
     // Posts: Anyone can read, only authenticated can create, owner can update/delete.
