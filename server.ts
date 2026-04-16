@@ -72,16 +72,30 @@ if (fs.existsSync(firebaseConfigPath)) {
             envType = "double-parsed JSON";
           }
           
-          // Auto-inject missing project_id if the user's JSON is stripped down
-          if (!serviceAccount.project_id && firebaseConfig.projectId) {
+          // Auto-inject missing project_id if it's a standard service account
+          if (serviceAccount.type !== 'authorized_user' && !serviceAccount.project_id && firebaseConfig.projectId) {
             serviceAccount.project_id = firebaseConfig.projectId;
           }
           
-          admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-            projectId: firebaseConfig.projectId,
-          });
-          console.log(`Firebase Admin initialized successfully with ${envType} for project: ${firebaseConfig.projectId}`);
+          if (serviceAccount.type === 'authorized_user') {
+            // Admin SDK cert() doesn't support 'authorized_user' (only service_account).
+            // We must use Application Default Credentials (ADC) by saving it to a temp file.
+            const tmpPath = require('path').join(require('os').tmpdir(), 'google-credentials.json');
+            require('fs').writeFileSync(tmpPath, JSON.stringify(serviceAccount));
+            process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
+            
+            admin.initializeApp({
+              projectId: firebaseConfig.projectId,
+            });
+            console.log(`Firebase Admin initialized successfully via ADC (authorized_user) for project: ${firebaseConfig.projectId}`);
+          } else {
+            // Standard Service Account
+            admin.initializeApp({
+              credential: admin.credential.cert(serviceAccount),
+              projectId: firebaseConfig.projectId,
+            });
+            console.log(`Firebase Admin initialized successfully with ${envType} (service_account) for project: ${firebaseConfig.projectId}`);
+          }
         } catch (e: any) {
           console.error("Failed to initialize with Service Account:", e.message);
           // Fallback to projectId only
