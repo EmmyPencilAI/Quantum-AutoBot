@@ -506,6 +506,56 @@ async function startServer() {
   // FINANCIAL ENDPOINTS — Auth Required on ALL of these
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // ── POST /api/trading/stop ──────────────────────────────────────────────
+  app.post(
+    "/api/trading/stop",
+    financialLimit,
+    verifyFirebaseToken,
+    requireSelfOrAdmin,
+    async (req: AuthRequest, res: Response) => {
+      if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+      const { uid } = req.body;
+      if (!uid) return res.status(400).json({ error: "Missing uid" });
+
+      try {
+        const userRef = db.collection("users").doc(uid);
+        const userSnap = await userRef.get();
+        if (!userSnap.exists) return res.status(404).json({ error: "User not found" });
+
+        const data = userSnap.data()!;
+        const currentWalletBalance = data.walletBalance || 0;
+        const currentInvestment = data.initialInvestment || 0;
+        const profit = data.totalProfit || 0;
+        const asset = data.tradingAsset || "USDT";
+        const engineBalance = asset === "USDC" ? (data.usdcBalance || 0) : (data.usdtBalance || 0);
+        const totalReturn = engineBalance > 0 ? engineBalance : (currentInvestment + profit);
+        const actualProfit = totalReturn - currentInvestment;
+
+        await userRef.update({
+          isTrading: false,
+          walletBalance: currentWalletBalance + totalReturn,
+          initialInvestment: 0,
+          usdtBalance: 0,
+          usdcBalance: 0,
+          totalProfit: 0,
+          tradingSessionId: null,
+          engineStatus: "STOPPED",
+        });
+
+        return res.json({
+          success: true,
+          totalReturn,
+          actualProfit,
+          newWalletBalance: currentWalletBalance + totalReturn,
+        });
+      } catch (error: any) {
+        console.error("Stop trading error:", error);
+        return res.status(500).json({ error: error.message });
+      }
+    }
+  );
+
   // ── POST /api/wallet/withdraw ─────────────────────────────────────────────
   app.post(
     "/api/wallet/withdraw",

@@ -245,44 +245,25 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     toast.loading("Stopping trade and withdrawing...", { id: "stop" });
 
     try {
-      const userRef = doc(db, "users", user.uid);
-      const userDoc = await getDoc(userRef);
-      if (!userDoc.exists()) throw new Error("User not found");
-
-      const data = userDoc.data();
-      const currentWalletBalance = data.walletBalance || 0;
-      const currentInvestment = data.initialInvestment || 0;
-      const profit = data.totalProfit || 0;
-      
-      // Use the actual trading engine balance as source of truth
-      // The backend modifies usdtBalance/usdcBalance every cycle
-      const asset = data.tradingAsset || "USDT";
-      const engineBalance = asset === "USDC" ? (data.usdcBalance || 0) : (data.usdtBalance || 0);
-      
-      // The real return is the engine balance (which already includes profits/losses)
-      // If engine never ran (balance is 0 but investment exists), fall back to investment + profit
-      const totalReturn = engineBalance > 0 ? engineBalance : (currentInvestment + profit);
-
-      // Return all funds to wallet balance and clear trading states
-      await updateDoc(userRef, {
-        isTrading: false,
-        walletBalance: currentWalletBalance + totalReturn,
-        initialInvestment: 0,
-        usdtBalance: 0,
-        usdcBalance: 0,
-        totalProfit: 0,
-        tradingSessionId: null,
+      const result = await apiFetch<{
+        success: boolean;
+        totalReturn: number;
+        actualProfit: number;
+        newWalletBalance: number;
+      }>("/api/trading/stop", {
+        method: "POST",
+        body: JSON.stringify({ uid: user.uid }),
       });
 
-      const actualProfit = totalReturn - currentInvestment;
-      if (actualProfit > 0.001) {
-        toast.success(`Trade closed! Returned $${totalReturn.toFixed(2)} (Profit: +$${actualProfit.toFixed(2)})`, { id: "stop" });
-      } else if (actualProfit < -0.001) {
-        toast.success(`Trade closed. Returned $${totalReturn.toFixed(2)} (Loss: $${actualProfit.toFixed(2)})`, { id: "stop" });
+      if (!result.success) throw new Error("Stop trading failed");
+
+      if (result.actualProfit > 0.001) {
+        toast.success(`Trade closed! Returned $${result.totalReturn.toFixed(2)} (Profit: +$${result.actualProfit.toFixed(2)})`, { id: "stop" });
+      } else if (result.actualProfit < -0.001) {
+        toast.success(`Trade closed. Returned $${result.totalReturn.toFixed(2)} (Loss: $${result.actualProfit.toFixed(2)})`, { id: "stop" });
       } else {
-        toast.success(`Trade closed. $${totalReturn.toFixed(2)} returned to wallet.`, { id: "stop" });
+        toast.success(`Trade closed. $${result.totalReturn.toFixed(2)} returned to wallet.`, { id: "stop" });
       }
-      
     } catch (e: any) {
       console.error("Stop trading failed:", e);
       toast.error("Failed to stop: " + (e.message || "Unknown error"), { id: "stop" });
