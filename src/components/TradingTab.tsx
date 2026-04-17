@@ -449,7 +449,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Pair & Strategy Selection */}
         <div className="lg:col-span-1 space-y-4 md:space-y-6">
-        <div className="lg:col-span-1 space-y-4 md:space-y-6">
           {!isTrading && setupStep === 1 && (
             <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
