@@ -40,15 +40,7 @@ service cloud.firestore {
              (data.totalProfit is number || !('totalProfit' in data)) &&
              (data.activeStrategy is string || !('activeStrategy' in data)) &&
              (data.activePair is string || !('activePair' in data)) &&
-             (data.tradingAsset is string || !('tradingAsset' in data)) &&
-             (data.connectedWallet is string || data.connectedWallet == null || !('connectedWallet' in data)) &&
-             (data.tradeCount is number || !('tradeCount' in data)) &&
-             (data.tradingStartedAt is string || !('tradingStartedAt' in data)) &&
-             (data.currentLotSize is number || !('currentLotSize' in data)) &&
-             (data.currentTrend is string || !('currentTrend' in data)) &&
-             (data.lastTradeAt is string || !('lastTradeAt' in data)) &&
-             (data.tradingSessionId is string || data.tradingSessionId == null || !('tradingSessionId' in data)) &&
-             (data.timestamp is string || !('timestamp' in data));
+             (data.tradingAsset is string || !('tradingAsset' in data));
     }
 
     function isValidPost(data) {

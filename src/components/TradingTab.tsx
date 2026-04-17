@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2, ArrowDownLeft, Clock, Trophy, Percent, Hash } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2, ArrowDownLeft } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Scatter, Cell, ReferenceLine } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
 import { deriveSuiWallet, transferOnChain, startSessionOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
 import { apiUrl } from "../lib/api";
-import { toast } from "sonner";
+import { Toaster, toast } from "sonner";
+import { formatNumber } from "../lib/utils";
 
 interface TradingTabProps {
   user: any;
@@ -20,17 +21,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [initialInvestment, setInitialInvestment] = useState(0);
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fundAmount, setFundAmount] = useState("");
+  const [fundAmount, setFundAmount] = useState("0");
   const [walletBalance, setWalletBalance] = useState(0);
   const [tradingAsset, setTradingAsset] = useState("USDT");
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawAddress, setWithdrawAddress] = useState("");
   const [withdrawAsset, setWithdrawAsset] = useState("USDT");
-  const [tradeCount, setTradeCount] = useState(0);
-  const [tradingStartedAt, setTradingStartedAt] = useState<string | null>(null);
-  const [currentLotSize, setCurrentLotSize] = useState(0.05);
-  const [winRate, setWinRate] = useState(0);
 
   // Sync with Firestore
   useEffect(() => {
@@ -46,9 +43,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setInitialInvestment(data.initialInvestment || 0);
         setWalletBalance(data.walletBalance || 0);
         setTradingAsset(data.tradingAsset || "USDT");
-        setTradeCount(data.tradeCount || 0);
-        setTradingStartedAt(data.tradingStartedAt || null);
-        setCurrentLotSize(data.currentLotSize || 0.05);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -77,14 +71,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
       const userTrades = allTrades.filter((t: any) => t.uid === user.uid).reverse();
       
+      // If we have trades, use them for the chart. 
       if (userTrades.length > 0) {
         setHistory(userTrades);
-        // Calculate win rate from actual trades
-        const wins = userTrades.filter((t: any) => t.pnl >= 0).length;
-        setWinRate(userTrades.length > 0 ? (wins / userTrades.length) * 100 : 0);
       } else {
         setHistory([{ time: "Start", value: 0 }]);
-        setWinRate(0);
       }
 
       // Also update global activity from the same snapshot to be efficient
@@ -101,76 +92,118 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
   const [globalActivity, setGlobalActivity] = useState<any[]>([]);
 
-  // ─── STOP TRADE (Settlement) ───
-  const stopTrading = async () => {
+  const toggleTrading = async () => {
     if (!user) return;
     setLoading(true);
     try {
-      toast.loading("Settling trades...", { id: "settle" });
-      const address = deriveSuiWallet(user.uid).toSuiAddress();
+      if (isTrading) {
+        // Settlement logic
+        toast.loading("Settling trades on-chain...", { id: "settle" });
+        const address = deriveSuiWallet(user.uid).toSuiAddress();
+        const idToken = await user.getIdToken();
+        const response = await fetch(apiUrl("/api/trading/settle"), {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`
+          },
+          body: JSON.stringify({ uid: user.uid, walletAddress: address })
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          console.error("Settlement API error:", text);
+          try {
+            const errorData = JSON.parse(text);
+            throw new Error(errorData.error || `Server error: ${response.status}`);
+          } catch (e) {
+            throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
+          }
+        }
+
+        const result = await response.json();
+        if (result.success) {
+          console.log("Settlement successful:", result);
+          toast.success("Settlement successful! Funds returned to wallet.", { id: "settle" });
+        } else {
+          throw new Error(result.error || "Settlement failed");
+        }
+      } else {
+        // Start trading
+        if (initialInvestment <= 0) {
+          toast.error("Please fund your trading account first.");
+          setLoading(false);
+          return;
+        }
+        await updateDoc(userRef, {
+          isTrading: true,
+          activeStrategy: strategy,
+          activePair: selectedPair,
+          timestamp: new Date().toISOString()
+        });
+        toast.success("Trading engine started!");
+      }
+    } catch (e: any) {
+      console.error("Trading toggle failed:", e);
+      toast.error("Action failed: " + (e.message || "Unknown error"), { id: "settle" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleWithdraw = async () => {
+    if (!user || !withdrawAmount || !withdrawAddress) {
+      toast.error("Please fill in all fields");
+      return;
+    }
+
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error("Invalid amount");
+      return;
+    }
+
+    if (amount > walletBalance) {
+      toast.error("Insufficient wallet balance");
+      return;
+    }
+
+    setLoading(true);
+    toast.loading("Processing withdrawal...", { id: "withdraw" });
+
+    try {
       const idToken = await user.getIdToken();
-      const response = await fetch(apiUrl("/api/trading/settle"), {
+      const response = await fetch(apiUrl("/api/wallet/withdraw"), {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${idToken}`
-        },
-        body: JSON.stringify({ uid: user.uid, walletAddress: address })
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
+        body: JSON.stringify({
+          uid: user.uid,
+          amount,
+          asset: withdrawAsset,
+          walletAddress: withdrawAddress
+        })
       });
+
       if (!response.ok) {
         const text = await response.text();
-        console.error("Settlement API error:", text);
-        try {
-          const errorData = JSON.parse(text);
-          throw new Error(errorData.error || `Server error: ${response.status}`);
-        } catch (e) {
-          throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
-        }
+        throw new Error(`Server error (${response.status}): ${text}`);
       }
 
       const result = await response.json();
       if (result.success) {
-        console.log("Settlement successful:", result);
-        toast.success("Trade stopped! Funds returned to wallet.", { id: "settle" });
+        toast.success("Withdrawal successful!", { id: "withdraw" });
+        setShowWithdrawModal(false);
+        setWithdrawAmount("");
       } else {
-        throw new Error(result.error || "Settlement failed");
+        throw new Error(result.error || "Withdrawal failed");
       }
-    } catch (e: any) {
-      console.error("Stop trade failed:", e);
-      toast.error("Stop failed: " + (e.message || "Unknown error"), { id: "settle" });
+    } catch (error: any) {
+      console.error("Withdrawal failed:", error);
+      toast.error(error.message || "Withdrawal failed", { id: "withdraw" });
     } finally {
       setLoading(false);
     }
   };
 
-  // ─── START TRADE ───
-  const startTrading = async () => {
-    if (!user || isTrading) return;
-    if (initialInvestment <= 0) {
-      toast.error("Please fund your trading account first.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        isTrading: true,
-        activeStrategy: strategy,
-        activePair: selectedPair,
-        tradingStartedAt: new Date().toISOString(),
-        tradeCount: 0,
-        timestamp: new Date().toISOString()
-      });
-      toast.success("Trading engine started!");
-    } catch (e: any) {
-      console.error("Start trade failed:", e);
-      toast.error("Failed to start: " + (e.message || "Unknown error"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ─── FUND TRADING ACCOUNT (does NOT start trading) ───
   const fundTrading = async () => {
     if (!user || isTrading) return;
     const amount = parseFloat(fundAmount);
@@ -183,19 +216,24 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     toast.loading("Processing funding...", { id: "fund" });
     try {
       if (amount <= walletBalance) {
+        // 1. Fund from internal wallet (Firestore only)
         console.log(`Funding ${amount} from internal wallet...`);
         const userRef = doc(db, "users", user.uid);
         const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
         await updateDoc(userRef, {
-          initialInvestment: (initialInvestment || 0) + amount,
-          [balanceField]: (initialInvestment || 0) + amount,
+          isTrading: true,
+          initialInvestment: amount,
+          [balanceField]: amount,
           walletBalance: walletBalance - amount,
           tradingAsset: tradingAsset,
+          activeStrategy: strategy,
+          activePair: selectedPair
+          // REMOVED totalProfit: 0 to persist leaderboard score
         });
 
-        toast.success(`Funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
+        toast.success(`Successfully funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
       } else {
-        // Fund from on-chain
+        // 2. Fund from on-chain (requires transfer to treasury or contract)
         const address = deriveSuiWallet(user.uid).toSuiAddress();
         const balances = await getAllBalances(address);
         
@@ -205,38 +243,54 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         else currentOnChainBalance = balances.usdt;
 
         if (amount > currentOnChainBalance) {
-          toast.error(`Insufficient balance. You have ${walletBalance.toFixed(2)} in wallet and ${currentOnChainBalance.toFixed(2)} on-chain.`, { id: "fund" });
+          toast.error(`Insufficient balance. You have ${walletBalance.toFixed(2)} in internal wallet and ${currentOnChainBalance.toFixed(2)} on-chain.`, { id: "fund" });
           setLoading(false);
           return;
         }
 
         if (balances.sui < 0.01) {
-          toast.error("Insufficient SUI for gas. Please get some SUI first.", { id: "fund" });
+          toast.error("Insufficient SUI for gas. Please receive some SUI first.", { id: "fund" });
           setLoading(false);
           return;
         }
 
         console.log(`Funding ${amount} from on-chain...`);
         const keypair = deriveSuiWallet(user.uid);
+        let sessionId = null;
 
         if (tradingAsset === "SUI") {
-          await startSessionOnChain({ signer: keypair, amount: amount });
+          // Call Move contract for SUI funding
+          sessionId = await startSessionOnChain({
+            signer: keypair,
+            amount: amount,
+          });
         } else {
+          // Transfer USDT/USDC to treasury
           const coinType = tradingAsset === "USDC" ? USDC_TYPE : USDT_TYPE;
-          await transferOnChain({ signer: keypair, to: SUI_TREASURY_ADDRESS, amount: amount, coinType: coinType });
+          await transferOnChain({
+            signer: keypair,
+            to: SUI_TREASURY_ADDRESS,
+            amount: amount,
+            coinType: coinType
+          });
         }
 
         const userRef = doc(db, "users", user.uid);
         const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
         await updateDoc(userRef, {
-          initialInvestment: (initialInvestment || 0) + amount,
-          [balanceField]: (initialInvestment || 0) + amount,
+          isTrading: true,
+          initialInvestment: amount,
+          [balanceField]: amount,
           tradingAsset: tradingAsset,
+          activeStrategy: strategy,
+          activePair: selectedPair,
+          totalProfit: 0,
+          tradingSessionId: sessionId // Store the session ID if it exists
         });
 
-        toast.success(`Funded ${amount} ${tradingAsset} from on-chain!`, { id: "fund" });
+        toast.success(`Successfully funded ${amount} ${tradingAsset} from on-chain!`, { id: "fund" });
       }
-      setFundAmount("");
+      setFundAmount("0");
     } catch (e: any) {
       console.error("Funding failed:", e);
       toast.error("Funding failed: " + (e.message || "Unknown error"), { id: "fund" });
@@ -250,9 +304,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     setStrategy(newStrategy);
     try {
       const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { activeStrategy: newStrategy });
+      await updateDoc(userRef, {
+        activeStrategy: newStrategy
+      });
     } catch (e: any) {
       console.error("Strategy change failed:", e);
+      alert("Strategy change failed: " + (e.message || "Unknown error"));
     }
   };
 
@@ -261,9 +318,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     setSelectedPair(newPair);
     try {
       const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { activePair: newPair });
+      await updateDoc(userRef, {
+        activePair: newPair
+      });
     } catch (e: any) {
       console.error("Pair change failed:", e);
+      alert("Pair change failed: " + (e.message || "Unknown error"));
     }
   };
 
@@ -290,7 +350,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
       const result = await response.json();
       if (result.success) {
-        toast.success(`Withdrawn ${result.withdrawn.toFixed(2)} to wallet!`, { id: "withdraw-profit" });
+        toast.success(`Successfully withdrawn ${result.withdrawn.toFixed(2)} to wallet balance!`, { id: "withdraw-profit" });
       } else {
         throw new Error(result.error || "Withdrawal failed");
       }
@@ -302,43 +362,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     }
   };
 
-  const handleWithdraw = async () => {
-    if (!user || !withdrawAmount || !withdrawAddress) {
-      toast.error("Please fill in all fields");
-      return;
-    }
-    const amount = parseFloat(withdrawAmount);
-    if (isNaN(amount) || amount <= 0) { toast.error("Invalid amount"); return; }
-    if (amount > walletBalance) { toast.error("Insufficient wallet balance"); return; }
-
-    setLoading(true);
-    toast.loading("Processing withdrawal...", { id: "withdraw" });
-    try {
-      const idToken = await user.getIdToken();
-      const response = await fetch(apiUrl("/api/wallet/withdraw"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
-        body: JSON.stringify({ uid: user.uid, amount, asset: withdrawAsset, walletAddress: withdrawAddress })
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Server error (${response.status}): ${text}`);
-      }
-      const result = await response.json();
-      if (result.success) {
-        toast.success("Withdrawal successful!", { id: "withdraw" });
-        setShowWithdrawModal(false);
-        setWithdrawAmount("");
-      } else {
-        throw new Error(result.error || "Withdrawal failed");
-      }
-    } catch (error: any) {
-      console.error("Withdrawal failed:", error);
-      toast.error(error.message || "Withdrawal failed", { id: "withdraw" });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const tradingPairs = [
     { symbol: "BTC / USDT", logo: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
@@ -354,32 +377,19 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   ];
 
   const strategies = [
-    { name: "Aggressive", icon: Zap, color: "text-red-400", bg: "bg-red-400/10", border: "border-red-500", desc: "AI Powered: 100% Win Rate, 200-400% ROI.", roi: "200-400%" },
-    { name: "Momentum", icon: Target, color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-500", desc: "Follows market trends and breakouts.", roi: "15-50%" },
-    { name: "Scalping", icon: Activity, color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-500", desc: "Small profits from frequent trades.", roi: "5-20%" },
-    { name: "Conservative", icon: Shield, color: "text-green-400", bg: "bg-green-400/10", border: "border-green-500", desc: "Low risk, steady growth.", roi: "3-10%" },
+    { name: "Aggressive", icon: Zap, color: "text-red-400", bg: "bg-red-400/10", desc: "AI Powered: 100% Win Rate, 200-400% ROI. Auto-reversal engine." },
+    { name: "Momentum", icon: Target, color: "text-orange-400", bg: "bg-orange-400/10", desc: "Follows market trends and breakouts." },
+    { name: "Scalping", icon: Activity, color: "text-blue-400", bg: "bg-blue-400/10", desc: "Small profits from frequent trades." },
+    { name: "Conservative", icon: Shield, color: "text-green-400", bg: "bg-green-400/10", desc: "Low risk, steady growth. Focuses on stability." },
   ];
 
-  const activePairData = tradingPairs.find(p => p.symbol === selectedPair) || tradingPairs[0];
-  const activeStrategyData = strategies.find(s => s.name === strategy) || strategies[0];
-  const roi = initialInvestment > 0 ? ((pnl / initialInvestment) * 100) : 0;
-  const tradingBalance = initialInvestment + pnl;
-
-  // Calculate trading duration
-  const [duration, setDuration] = useState("");
   useEffect(() => {
-    if (!isTrading || !tradingStartedAt) { setDuration("--"); return; }
-    const interval = setInterval(() => {
-      const start = new Date(tradingStartedAt).getTime();
-      const now = Date.now();
-      const diff = now - start;
-      const hours = Math.floor(diff / 3600000);
-      const mins = Math.floor((diff % 3600000) / 60000);
-      const secs = Math.floor((diff % 60000) / 1000);
-      setDuration(`${hours}h ${mins}m ${secs}s`);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isTrading, tradingStartedAt]);
+    // The background trading engine in server.ts handles trade generation
+    // We just listen to Firestore updates for real-time data
+    return () => {};
+  }, [isTrading]);
+
+  const activePairData = tradingPairs.find(p => p.symbol === selectedPair) || tradingPairs[0];
 
   return (
     <div className="space-y-4 md:space-y-6 pb-20 md:pb-0">
@@ -402,167 +412,113 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-        {/* Left Column: Step-by-Step Flow */}
-        <div className="lg:col-span-1 space-y-4 md:space-y-5">
-          
-          {/* ═══ STEP 1: Fund Trading Account ═══ */}
-          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-4 space-y-3 relative overflow-hidden">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-6 h-6 rounded-full bg-orange-500 text-black flex items-center justify-center text-[10px] font-black">1</div>
-              <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Fund Trading Account</h3>
-            </div>
-            
-            <div className="flex gap-2 mb-1">
-              {["SUI", "USDT", "USDC"].map((asset) => (
-                <button
-                  key={asset}
-                  onClick={() => setTradingAsset(asset)}
-                  disabled={isTrading || loading}
-                  className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
-                    tradingAsset === asset
-                      ? "bg-orange-500 border-orange-500 text-black"
-                      : "bg-white/5 border-white/10 text-white/40 hover:border-white/20"
-                  }`}
-                >
-                  {asset}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={fundAmount}
-                onChange={(e) => setFundAmount(e.target.value)}
-                disabled={isTrading || loading}
-                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-500/50 transition-all"
-                placeholder={`Amount (${tradingAsset})`}
-              />
-              <button
-                onClick={fundTrading}
-                disabled={isTrading || loading || !fundAmount}
-                className="bg-orange-500 text-black px-5 py-2.5 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50 whitespace-nowrap"
-              >
-                {loading ? "..." : "Fund"}
-              </button>
-            </div>
-            <div className="flex justify-between text-[10px] text-white/40">
-              <span>Wallet: <span className="text-blue-400 font-bold">{walletBalance.toFixed(2)} USD</span></span>
-              <span>Funded: <span className="text-green-400 font-bold">{initialInvestment.toFixed(2)} {tradingAsset}</span></span>
-            </div>
-            
-            {/* Withdraw link */}
+        {/* Pair & Strategy Selection */}
+        <div className="lg:col-span-1 space-y-4 md:space-y-6">
+        {/* Fund Trading */}
+        <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Fund Trading Account</h3>
             <button 
               onClick={() => setShowWithdrawModal(true)}
-              className="text-[10px] font-bold text-orange-500/60 hover:text-orange-500 transition-colors flex items-center gap-1"
+              className="text-[10px] font-bold text-orange-500 hover:underline flex items-center gap-1"
             >
-              <ArrowDownLeft size={10} />
               Withdraw to On-chain Wallet
             </button>
           </div>
+          
+          <div className="flex gap-2 mb-2">
+            {["SUI", "USDT", "USDC"].map((asset) => (
+              <button
+                key={asset}
+                onClick={() => setTradingAsset(asset)}
+                disabled={isTrading || loading}
+                className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                  tradingAsset === asset
+                    ? "bg-orange-500 border-orange-500 text-black"
+                    : "bg-white/5 border-white/10 text-white/40"
+                }`}
+              >
+                {asset}
+              </button>
+            ))}
+          </div>
 
-          {/* ═══ STEP 2: Select Trading Pair ═══ */}
-          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center gap-2 mb-1">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${initialInvestment > 0 ? 'bg-orange-500 text-black' : 'bg-white/10 text-white/30'}`}>2</div>
-              <h3 className="text-xs font-bold uppercase tracking-widest text-white/60">Select Trading Pair</h3>
-            </div>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              value={fundAmount}
+              onChange={(e) => setFundAmount(e.target.value)}
+              disabled={isTrading || loading}
+              className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-orange-500/50"
+              placeholder={`Amount (${tradingAsset})`}
+            />
+            <button
+              onClick={fundTrading}
+              disabled={isTrading || loading}
+              className="bg-orange-500 text-black px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50 whitespace-nowrap"
+            >
+              {loading ? "Processing..." : "Fund & Start"}
+            </button>
+          </div>
+          <p className="text-[10px] text-white/40">
+            Wallet Balance: <span className="text-blue-400 font-bold">{formatNumber(walletBalance, 2)} USD</span>
+          </p>
+          <p className="text-[10px] text-white/40">
+            Trading Balance: <span className="text-green-400 font-bold">{formatNumber(initialInvestment + pnl, 2)} {tradingAsset}</span>
+          </p>
+        </div>
+
+          {/* Pair Selection */}
+          <div className="space-y-3 md:space-y-4">
+            <h3 className="text-sm md:text-lg font-bold tracking-tight mb-1 md:mb-4">Select Trading Pair</h3>
             <div className="grid grid-cols-2 gap-2">
               {tradingPairs.map((pair) => (
                 <button
                   key={pair.symbol}
                   onClick={() => changePair(pair.symbol)}
                   disabled={isTrading || loading}
-                  className={`py-2 px-3 rounded-xl border text-[10px] font-bold transition-all flex items-center gap-2 ${
+                  className={`py-2.5 md:py-3 px-3 md:px-4 rounded-xl md:rounded-2xl border text-[10px] md:text-sm font-bold transition-all flex items-center gap-2 ${
                     selectedPair === pair.symbol
                       ? "bg-orange-500 text-black border-orange-500 shadow-lg shadow-orange-500/20"
-                      : "bg-white/5 border-white/10 text-white/60 hover:border-white/20"
+                      : "bg-[#0a0a0a] border-white/10 text-white/60 hover:border-white/20"
                   }`}
                 >
-                  <img src={pair.logo} alt={pair.symbol} className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                  <img src={pair.logo} alt={pair.symbol} className="w-4 h-4 md:w-5 md:h-5 object-contain" referrerPolicy="no-referrer" />
                   <span className="truncate">{pair.symbol}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* ═══ STEP 3: Select Strategy ═══ */}
-          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center gap-2 mb-1">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${initialInvestment > 0 ? 'bg-orange-500 text-black' : 'bg-white/10 text-white/30'}`}>3</div>
-              <h3 className="text-xs font-bold uppercase tracking-widest text-white/60">Select Strategy</h3>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2">
+          {/* Strategy Selection */}
+          <div className="space-y-3 md:space-y-4">
+            <h3 className="text-sm md:text-lg font-bold tracking-tight mb-1 md:mb-4">Select Strategy</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2 md:gap-4">
               {strategies.map((s) => (
                 <button
                   key={s.name}
                   onClick={() => changeStrategy(s.name)}
                   disabled={isTrading || loading}
-                  className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${
+                  className={`flex items-center gap-3 md:gap-4 p-3 md:p-5 rounded-xl md:rounded-3xl border transition-all text-left ${
                     strategy === s.name
-                      ? `bg-white/5 ${s.border} shadow-lg`
-                      : "bg-white/[0.02] border-white/10 opacity-60 hover:opacity-100"
+                      ? "bg-white/5 border-orange-500 shadow-lg shadow-orange-500/10"
+                      : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
                   }`}
                 >
-                  <div className={`w-8 h-8 shrink-0 ${s.bg} ${s.color} rounded-lg flex items-center justify-center`}>
-                    <s.icon size={16} />
+                  <div className={`w-8 h-8 md:w-12 md:h-12 shrink-0 ${s.bg} ${s.color} rounded-lg md:rounded-2xl flex items-center justify-center`}>
+                    <s.icon size={16} className="md:w-6 md:h-6" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-bold text-xs truncate">{s.name}</p>
-                      <span className={`text-[8px] font-bold ${s.color} bg-white/5 px-1.5 py-0.5 rounded`}>{s.roi}</span>
-                    </div>
-                    <p className="text-[8px] text-white/40 leading-tight line-clamp-1">{s.desc}</p>
+                    <p className="font-bold text-xs md:text-lg truncate">{s.name}</p>
+                    <p className="text-[8px] md:text-xs text-white/40 leading-tight line-clamp-1 md:line-clamp-2">{s.desc}</p>
                   </div>
-                  {strategy === s.name && <ChevronRight className="text-orange-500 shrink-0" size={14} />}
+                  {strategy === s.name && <ChevronRight className="text-orange-500 shrink-0 md:w-4 md:h-4" size={14} />}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* ═══ STEP 4: Trade Summary + Start/Stop ═══ */}
-          {!isTrading ? (
-            <div className="bg-gradient-to-br from-orange-500/5 to-orange-500/[0.02] border border-orange-500/20 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center gap-2 mb-1">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${initialInvestment > 0 ? 'bg-orange-500 text-black' : 'bg-white/10 text-white/30'}`}>4</div>
-                <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Trade Summary</h3>
-              </div>
-              
-              <div className="space-y-2 text-[11px]">
-                <div className="flex justify-between py-1.5 border-b border-white/5">
-                  <span className="text-white/40">Amount</span>
-                  <span className="font-bold text-white">{initialInvestment.toFixed(2)} {tradingAsset}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-white/5">
-                  <span className="text-white/40">Trading Pair</span>
-                  <span className="font-bold text-white flex items-center gap-1.5">
-                    <img src={activePairData.logo} alt="" className="w-3.5 h-3.5" referrerPolicy="no-referrer" />
-                    {selectedPair}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-white/5">
-                  <span className="text-white/40">Strategy</span>
-                  <span className={`font-bold ${activeStrategyData.color}`}>{strategy}</span>
-                </div>
-                <div className="flex justify-between py-1.5">
-                  <span className="text-white/40">Est. ROI</span>
-                  <span className="font-bold text-green-400">{activeStrategyData.roi}</span>
-                </div>
-              </div>
-
-              <button
-                onClick={startTrading}
-                disabled={loading || initialInvestment <= 0}
-                className="w-full py-4 rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-all bg-green-500 text-black hover:bg-green-400 shadow-xl shadow-green-500/20 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <Play size={20} fill="currentColor" />
-                <span>{loading ? "Starting..." : "Start Trading"}</span>
-              </button>
-              {initialInvestment <= 0 && (
-                <p className="text-[9px] text-center text-white/30">Fund your account first to start trading</p>
-              )}
-            </div>
-          ) : (
+          {isTrading && (
             <div className="space-y-3">
               <button
                 onClick={withdrawProfit}
@@ -570,29 +526,28 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                 className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all bg-green-500/10 border border-green-500/20 text-green-500 hover:bg-green-500/20 disabled:opacity-50"
               >
                 <ArrowDownLeft size={16} />
-                <span>Withdraw Profit to Wallet</span>
+                <span>Withdraw Profit to Wallet Balance</span>
               </button>
               <button
-                onClick={stopTrading}
+                onClick={toggleTrading}
                 disabled={loading}
-                className="w-full py-4 rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-all bg-red-500/10 border-2 border-red-500/30 text-red-500 hover:bg-red-500/20 shadow-xl shadow-red-500/5"
+                className="w-full py-4 md:py-6 rounded-xl md:rounded-3xl font-bold text-base md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 shadow-xl shadow-red-500/5"
               >
-                <Square size={18} fill="currentColor" />
-                <span>{loading ? "Stopping..." : "Stop Trade"}</span>
+                <Square size={18} className="md:w-6 md:h-6" fill="currentColor" />
+                <span className="truncate text-sm md:text-xl">{loading ? "Processing..." : "Stop & Withdraw to Wallet Balance"}</span>
               </button>
             </div>
           )}
         </div>
 
-        {/* ═══ Right Column: Live PnL, Stats & Activity ═══ */}
+        {/* Live PnL & Activity */}
         <div className="lg:col-span-2 space-y-4 md:space-y-6">
-          {/* Live PnL Chart */}
           <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden shadow-2xl">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 md:mb-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 md:mb-8">
               <div>
                 <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Live Profit/Loss</p>
                 <h3 className={`text-2xl md:text-5xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} <span className="text-base md:text-2xl opacity-60">USDT</span>
+                  {pnl >= 0 ? "+" : ""}{formatNumber(pnl, 2)} <span className="text-base md:text-2xl opacity-60">USDT</span>
                 </h3>
               </div>
               <div className="sm:text-right flex flex-col sm:items-end gap-2">
@@ -610,8 +565,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               </div>
             </div>
 
-            {/* Candlestick Chart */}
-            <div className="h-56 md:h-72 w-full">
+            {/* Candlestick Chart Simulation */}
+            <div className="h-64 md:h-80 w-full mt-4">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={history.map((h, i) => {
                   const prev = history[i-1]?.value || 0;
@@ -620,7 +575,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                   const high = Math.max(open, close) + Math.abs(open - close) * 0.2;
                   const low = Math.min(open, close) - Math.abs(open - close) * 0.2;
                   return {
-                    ...h, open, close, high, low,
+                    ...h,
+                    open,
+                    close,
+                    high,
+                    low,
+                    // Recharts Bar needs a range [low, high] or [start, end]
+                    // We use [min(open, close), max(open, close)] for the body
                     candle: [Math.min(open, close), Math.max(open, close)],
                     wick: [low, high],
                     isUp: close >= open,
@@ -639,12 +600,16 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                           <div className="bg-[#0a0a0a] border border-white/10 p-3 rounded-xl shadow-2xl">
                             <p className="text-[10px] font-bold text-white/40 uppercase mb-1">{data.time}</p>
                             <p className={`text-sm font-bold ${data.isUp ? "text-green-400" : "text-red-400"}`}>
-                              {data.isUp ? "UP" : "DOWN"} • {data.value?.toFixed(4)} USDT
+                              {data.isUp ? "UP" : "DOWN"} • {data.value.toFixed(4)} USDT
                             </p>
                             {data.isTrade && (
-                              <div className="mt-1">
-                                <p className="text-[10px] font-bold text-orange-500 uppercase">Trade: {data.type}</p>
-                                <p className="text-[9px] text-white/60">Lot: {data.lotSize?.toFixed(2) || "0.05"}</p>
+                              <div className="mt-1 space-y-0.5">
+                                <p className="text-[10px] font-bold text-orange-500 uppercase">
+                                  Trade Taken: {data.type}
+                                </p>
+                                <p className="text-[9px] text-white/60">
+                                  Lot Size: {data.lotSize?.toFixed(2) || "0.05"}
+                                </p>
                               </div>
                             )}
                           </div>
@@ -653,16 +618,22 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       return null;
                     }}
                   />
+                  
+                  {/* Wicks */}
                   <Bar dataKey="wick" barSize={2}>
                     {history.map((entry, index) => (
                       <Cell key={`wick-${index}`} fill={entry.pnl >= 0 ? "#4ade80" : "#f87171"} opacity={0.3} />
                     ))}
                   </Bar>
+                  
+                  {/* Candle Bodies */}
                   <Bar dataKey="candle" barSize={window.innerWidth < 640 ? 4 : 8}>
                     {history.map((entry, index) => (
                       <Cell key={`body-${index}`} fill={entry.pnl >= 0 ? "#4ade80" : "#f87171"} />
                     ))}
                   </Bar>
+
+                  {/* Trade Markers */}
                   <Scatter dataKey="value" shape={(props: any) => {
                     const { cx, cy, payload } = props;
                     if (!payload.isTrade) return null;
@@ -676,49 +647,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       </g>
                     );
                   }} />
+
                   <ReferenceLine y={0} stroke="rgba(255,255,255,0.1)" strokeDasharray="3 3" />
                 </ComposedChart>
               </ResponsiveContainer>
-            </div>
-
-            {/* ═══ STATS BAR (ROI / Trades / Win Rate / Duration) ═══ */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t border-white/5">
-              <div className="bg-white/[0.03] rounded-xl p-3 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Percent size={12} className="text-orange-500" />
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">ROI</p>
-                </div>
-                <p className={`text-lg md:text-xl font-bold tracking-tight ${roi >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {roi >= 0 ? "+" : ""}{roi.toFixed(1)}%
-                </p>
-              </div>
-              <div className="bg-white/[0.03] rounded-xl p-3 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Hash size={12} className="text-blue-500" />
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">Trades</p>
-                </div>
-                <p className="text-lg md:text-xl font-bold tracking-tight text-white">
-                  {tradeCount.toLocaleString()}
-                </p>
-              </div>
-              <div className="bg-white/[0.03] rounded-xl p-3 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Trophy size={12} className="text-yellow-500" />
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">Win Rate</p>
-                </div>
-                <p className="text-lg md:text-xl font-bold tracking-tight text-green-400">
-                  {winRate.toFixed(1)}%
-                </p>
-              </div>
-              <div className="bg-white/[0.03] rounded-xl p-3 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Clock size={12} className="text-purple-500" />
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">Duration</p>
-                </div>
-                <p className="text-sm md:text-base font-bold tracking-tight text-white/80 font-mono">
-                  {duration}
-                </p>
-              </div>
             </div>
           </div>
 
@@ -756,7 +688,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       </div>
                       <div className="text-right shrink-0">
                         <p className={`font-bold text-xs md:text-base ${trade.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                          {trade.pnl >= 0 ? "+" : ""}{trade.pnl.toFixed(4)} USDT
+                          {trade.pnl >= 0 ? "+" : ""}{formatNumber(trade.pnl, 4)} USDT
                         </p>
                         <p className="text-[9px] md:text-xs text-white/40">{trade.time}</p>
                       </div>
@@ -773,7 +705,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           </div>
         </div>
       </div>
-
       {/* Withdraw Modal */}
       <AnimatePresence>
         {showWithdrawModal && (
@@ -801,6 +732,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                     ))}
                   </div>
                 </div>
+
                 <div>
                   <label className="text-xs font-bold uppercase tracking-widest text-white/40 mb-2 block">Amount</label>
                   <div className="relative">
@@ -818,8 +750,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       MAX
                     </button>
                   </div>
-                  <p className="text-[10px] text-white/40 mt-1">Available: {walletBalance.toFixed(2)} USD</p>
+                  <p className="text-[10px] text-white/40 mt-1">Available: {formatNumber(walletBalance, 2)} USD</p>
                 </div>
+
                 <div>
                   <label className="text-xs font-bold uppercase tracking-widest text-white/40 mb-2 block">Destination Address</label>
                   <input
@@ -830,6 +763,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                     className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white font-mono text-xs focus:outline-none focus:border-orange-500/50 transition-all"
                   />
                 </div>
+
                 <div className="flex gap-3 pt-4">
                   <button
                     onClick={() => setShowWithdrawModal(false)}

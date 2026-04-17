@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets, Link, Unlink, Wallet } from "lucide-react";
+import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
 import { motion } from "motion/react";
 import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
 import { db } from "../firebase";
@@ -9,6 +9,7 @@ import { apiUrl } from "../lib/api";
 import { useCurrentAccount, useDAppKit } from "@mysten/dapp-kit-react";
 import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { toast } from "sonner";
+import { formatNumber } from "../lib/utils";
 
 interface WalletTabProps {
   user: any;
@@ -39,7 +40,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const [copied, setCopied] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [isRequestingGas, setIsRequestingGas] = useState(false);
-
   // Real wallet connection via dapp-kit
   const currentAccount = useCurrentAccount();
   const dAppKit = useDAppKit();
@@ -343,7 +343,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
         </div>
       </div>
-
       {/* Profile & Wallet Card */}
       <div className="bg-[#0a0a0a] border border-white/10 rounded-xl md:rounded-3xl p-4 md:p-8 flex flex-col md:flex-row items-center gap-4 md:gap-8 shadow-2xl overflow-hidden relative">
         <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -397,7 +396,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">Sui Balance (Gas)</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.sui.toFixed(4)}</h3>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{formatNumber(balances.sui, 4)}</h3>
             <span className="text-orange-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">SUI</span>
           </div>
           <div className="mt-3 md:mt-6 flex flex-wrap gap-2">
@@ -423,7 +422,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">On-chain USDT</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.usdt.toFixed(2)}</h3>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{formatNumber(balances.usdt, 2)}</h3>
             <span className="text-green-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USDT</span>
           </div>
           <p className="mt-2 text-[8px] md:text-[10px] text-white/20">Available for trading top-up</p>
@@ -436,7 +435,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">On-chain USDC</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{balances.usdc.toFixed(2)}</h3>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter">{formatNumber(balances.usdc, 2)}</h3>
             <span className="text-blue-500 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USDC</span>
           </div>
           <p className="mt-2 text-[8px] md:text-[10px] text-white/20">Available for trading top-up</p>
@@ -449,7 +448,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
           </div>
           <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-2 md:mb-4">Trading Wallet</p>
           <div className="flex items-end gap-1.5 md:gap-3">
-            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter text-orange-500">{balances.wallet.toFixed(2)}</h3>
+            <h3 className="text-2xl md:text-3xl font-bold tracking-tighter text-orange-500">{formatNumber(balances.wallet, 2)}</h3>
             <span className="text-white/40 font-bold mb-0.5 md:mb-1 text-[10px] md:text-sm">USD</span>
           </div>
           <button 
@@ -527,7 +526,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
                 </div>
                 <div className="text-right shrink-0">
                   <p className={`font-bold text-xs md:text-base ${n.amount >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {n.amount ? (n.amount >= 0 ? "+" : "") + n.amount.toFixed(2) : ""}
+                    {n.amount ? (n.amount >= 0 ? "+" : "") + formatNumber(n.amount, 2) : ""}
                   </p>
                   <p className="text-[9px] md:text-xs text-white/40">{new Date(n.timestamp).toLocaleDateString()}</p>
                 </div>
