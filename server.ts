@@ -33,70 +33,149 @@ const suiClient = new SuiClient({ url: getFullnodeUrl("testnet"), network: "test
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
 let db: any = null;
 
+// Helper: Bootstrap Google credentials from env vars so applicationDefault() can find them
+function bootstrapGoogleCredentials(): void {
+  // Priority 1: GOOGLE_CREDENTIALS_JSON env var (used on Render)
+  // This handles both "authorized_user" and "service_account" type credentials
+  const credentialsJson = process.env.GOOGLE_CREDENTIALS_JSON;
+  if (credentialsJson && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
+      // Validate it's parseable JSON
+      const parsed = JSON.parse(credentialsJson);
+      console.log(`✅ Found GOOGLE_CREDENTIALS_JSON env var (type: ${parsed.type})`);
+      
+      // Write to a temp file so GOOGLE_APPLICATION_CREDENTIALS can point to it
+      const credFilePath = path.join(process.cwd(), ".gcp-credentials.json");
+      fs.writeFileSync(credFilePath, credentialsJson, "utf-8");
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = credFilePath;
+      console.log(`✅ Wrote credentials to ${credFilePath} and set GOOGLE_APPLICATION_CREDENTIALS`);
+    } catch (e) {
+      console.error("❌ Failed to parse GOOGLE_CREDENTIALS_JSON env var:", e);
+    }
+  }
+
+  // Priority 2: FIREBASE_SERVICE_ACCOUNT_KEY env var (alternative for service accounts)
+  const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  if (serviceAccountEnv && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
+      let jsonStr: string;
+      try {
+        JSON.parse(serviceAccountEnv);
+        jsonStr = serviceAccountEnv;
+      } catch {
+        jsonStr = Buffer.from(serviceAccountEnv, "base64").toString("utf-8");
+        JSON.parse(jsonStr); // validate
+      }
+      const credFilePath = path.join(process.cwd(), ".gcp-credentials.json");
+      fs.writeFileSync(credFilePath, jsonStr, "utf-8");
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = credFilePath;
+      console.log("✅ Wrote FIREBASE_SERVICE_ACCOUNT_KEY to file and set GOOGLE_APPLICATION_CREDENTIALS");
+    } catch (e) {
+      console.error("❌ Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY env var:", e);
+    }
+  }
+
+  // Priority 3: Local firebase-service-account.json file (for local development)
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    const localServiceAccount = path.join(process.cwd(), "firebase-service-account.json");
+    if (fs.existsSync(localServiceAccount)) {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = localServiceAccount;
+      console.log(`✅ Using local firebase-service-account.json for credentials`);
+    }
+  }
+
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    console.warn("⚠️  No Google credentials found. Firebase Admin will fail on non-Google hosts.");
+    console.warn("   Set GOOGLE_CREDENTIALS_JSON env var with your credential JSON on Render.");
+  }
+}
+
+// Run credential bootstrap BEFORE Firebase init
+bootstrapGoogleCredentials();
+
 if (fs.existsSync(firebaseConfigPath)) {
   try {
     const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
     
     if (!admin.apps.length) {
       try {
-        // Prioritize explicit projectId from config to avoid connecting to the wrong project
-        admin.initializeApp({
-          projectId: firebaseConfig.projectId,
-        });
-        console.log(`Firebase Admin initialized with explicit projectId: ${firebaseConfig.projectId}`);
-      } catch (e) {
-        console.warn("Explicit Firebase Admin initialization failed, trying default:", e);
-        try {
-          admin.initializeApp();
-          console.log("Firebase Admin initialized with default environment config");
-        } catch (e2) {
-          console.error("Critical: Firebase Admin initialization failed completely:", e2);
+        // Detect credential type to use the right initialization method
+        const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        let credType = "unknown";
+        if (credPath && fs.existsSync(credPath)) {
+          try {
+            const credData = JSON.parse(fs.readFileSync(credPath, "utf-8"));
+            credType = credData.type || "unknown";
+          } catch {}
         }
-      }
-    }
-    
-    const adminApp = admin.app();
-    // Use the named database if provided, otherwise default
-    const dbId = firebaseConfig.firestoreDatabaseId || "";
-    
-    const tryConnect = async (targetDbId: string | undefined) => {
-      const displayId = targetDbId || "(default)";
-      console.log(`Attempting to connect to Firestore Database: ${displayId}`);
-      const testDb = getFirestore(adminApp, targetDbId);
-      await testDb.collection("health_check").doc("ping").set({ 
-        lastPing: new Date().toISOString(),
-        projectId: firebaseConfig.projectId,
-        databaseId: displayId
-      });
-      return testDb;
-    };
 
-    try {
-      // 1. Try the one from config if it looks valid
-      const initialDbId = (!dbId || dbId.includes("TODO") || dbId === "") ? undefined : dbId;
-      db = await tryConnect(initialDbId);
-      console.log(`Firebase Admin connected successfully to database: ${initialDbId || "(default)"}`);
-    } catch (e: any) {
-      console.error(`Failed to connect to initial database ${dbId || "(default)"}:`, e.message);
-      try {
-        // 2. Try explicit (default)
-        db = await tryConnect("(default)");
-        console.log("Firebase Admin connected successfully to (default) database");
-      } catch (e2: any) {
-        console.error("Failed to connect to (default) database:", e2.message);
-        try {
-          // 3. Try undefined (which should be the same as default but sometimes behaves differently in SDK)
-          db = await tryConnect(undefined);
-          console.log("Firebase Admin connected successfully to undefined (default) database");
-        } catch (e3: any) {
-          console.error("Critical: Failed to connect to any Firestore database:", e3.message);
-          // Ultimate fallback to allow the object to exist even if it fails later
-          db = getFirestore(adminApp);
+        if (credType === "service_account") {
+          // Service account: use cert() for direct admin access
+          const serviceAccount = JSON.parse(fs.readFileSync(credPath!, "utf-8"));
+          admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            projectId: firebaseConfig.projectId,
+          });
+          console.log(`Firebase Admin initialized with service_account credentials for project: ${firebaseConfig.projectId}`);
+        } else {
+          // authorized_user or other: use applicationDefault() which handles all types
+          admin.initializeApp({
+            credential: admin.credential.applicationDefault(),
+            projectId: firebaseConfig.projectId,
+          });
+          console.log(`Firebase Admin initialized with applicationDefault (${credType}) for project: ${firebaseConfig.projectId}`);
         }
+      } catch (e) {
+        console.error("❌ Firebase Admin initialization failed:", e);
+        console.error("   👉 Ensure GOOGLE_CREDENTIALS_JSON is set correctly on Render.");
+        console.error("   👉 Current GOOGLE_APPLICATION_CREDENTIALS:", process.env.GOOGLE_APPLICATION_CREDENTIALS || "NOT SET");
       }
     }
     
-    console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
+    if (admin.apps.length > 0) {
+      const adminApp = admin.app();
+      // Use the named database if provided, otherwise default
+      const dbId = firebaseConfig.firestoreDatabaseId || "";
+      
+      const tryConnect = async (targetDbId: string | undefined) => {
+        const displayId = targetDbId || "(default)";
+        console.log(`Attempting to connect to Firestore Database: ${displayId}`);
+        const testDb = getFirestore(adminApp, targetDbId);
+        await testDb.collection("health_check").doc("ping").set({ 
+          lastPing: new Date().toISOString(),
+          projectId: firebaseConfig.projectId,
+          databaseId: displayId
+        });
+        return testDb;
+      };
+
+      try {
+        // 1. Try the one from config if it looks valid
+        const initialDbId = (!dbId || dbId.includes("TODO") || dbId === "") ? undefined : dbId;
+        db = await tryConnect(initialDbId);
+        console.log(`Firebase Admin connected successfully to database: ${initialDbId || "(default)"}`);
+      } catch (e: any) {
+        console.error(`Failed to connect to initial database ${dbId || "(default)"}:`, e.message);
+        try {
+          // 2. Try explicit (default)
+          db = await tryConnect("(default)");
+          console.log("Firebase Admin connected successfully to (default) database");
+        } catch (e2: any) {
+          console.error("Failed to connect to (default) database:", e2.message);
+          try {
+            // 3. Try undefined (which should be the same as default but sometimes behaves differently in SDK)
+            db = await tryConnect(undefined);
+            console.log("Firebase Admin connected successfully to undefined (default) database");
+          } catch (e3: any) {
+            console.error("Critical: Failed to connect to any Firestore database:", e3.message);
+            // Ultimate fallback to allow the object to exist even if it fails later
+            db = getFirestore(adminApp);
+          }
+        }
+      }
+      
+      console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
+    }
   } catch (e) {
     console.error("Critical failure during Firebase Admin initialization:", e);
   }

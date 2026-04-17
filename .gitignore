@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Firebase service account keys (NEVER commit these)
+firebase-service-account.json
+*-service-account*.json
+*-credentials*.json
+.gcp-credentials.json
