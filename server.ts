@@ -720,7 +720,8 @@ async function startServer() {
   // Trading Engine Simulation & Settlement
   app.post("/api/trading/settle", authenticate, async (req, res) => {
     const { uid, walletAddress } = req.body;
-    if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
+    if (!db) return res.status(503).json({ error: "Database not initialized. Server may be starting up." });
+    if (!uid) return res.status(400).json({ error: "Missing user ID in request" });
 
     // Safety: ensure UID matches token
     if ((req as any).user.uid !== uid) return res.status(403).json({ error: "Unauthorized access" });
@@ -908,7 +909,8 @@ async function startServer() {
   // Withdraw profit without stopping trade
   app.post("/api/trading/withdraw-profit", authenticate, async (req, res) => {
     const { uid, walletAddress } = req.body;
-    if (!db || !uid) return res.status(400).json({ error: "Invalid request" });
+    if (!db) return res.status(503).json({ error: "Database not initialized. Server may be starting up." });
+    if (!uid) return res.status(400).json({ error: "Missing user ID in request" });
 
     // Safety: ensure UID matches token
     if ((req as any).user.uid !== uid) return res.status(403).json({ error: "Unauthorized access" });

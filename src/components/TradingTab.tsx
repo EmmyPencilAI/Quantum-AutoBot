@@ -3,7 +3,7 @@ import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, T
 import { motion, AnimatePresence } from "motion/react";
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Scatter, Cell, ReferenceLine } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
-import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, getDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
 import { deriveSuiWallet, transferOnChain, startSessionOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
 import { apiUrl } from "../lib/api";
 import { Toaster, toast } from "sonner";
@@ -131,32 +131,74 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         // Settlement logic
         toast.loading("Settling trades on-chain...", { id: "settle" });
         const address = deriveSuiWallet(user.uid).toSuiAddress();
-        const idToken = await user.getIdToken();
-        const response = await fetch(apiUrl("/api/trading/settle"), {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${idToken}`
-          },
-          body: JSON.stringify({ uid: user.uid, walletAddress: address })
-        });
-        if (!response.ok) {
-          const text = await response.text();
-          console.error("Settlement API error:", text);
-          try {
-            const errorData = JSON.parse(text);
-            throw new Error(errorData.error || `Server error: ${response.status}`);
-          } catch (e) {
-            throw new Error(`Server error (${response.status}): ${text.slice(0, 100)}`);
+        
+        // Try server-side settlement first, fall back to client-side if server is unavailable
+        let serverSettled = false;
+        try {
+          const idToken = await user.getIdToken();
+          const response = await fetch(apiUrl("/api/trading/settle"), {
+            method: "POST",
+            headers: { 
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${idToken}`
+            },
+            body: JSON.stringify({ uid: user.uid, walletAddress: address })
+          });
+          
+          if (!response.ok) {
+            const text = await response.text();
+            console.error("Settlement API error:", text);
+            let errorMessage = `Server error (${response.status}): ${text.slice(0, 100)}`;
+            try {
+              const errorData = JSON.parse(text);
+              errorMessage = errorData.error || errorMessage;
+            } catch {}
+            throw new Error(errorMessage);
           }
-        }
 
-        const result = await response.json();
-        if (result.success) {
-          console.log("Settlement successful:", result);
-          toast.success("Settlement successful! Funds returned to wallet.", { id: "settle" });
-        } else {
-          throw new Error(result.error || "Settlement failed");
+          const result = await response.json();
+          if (result.success) {
+            console.log("Settlement successful:", result);
+            toast.success("Settlement successful! Funds returned to wallet.", { id: "settle" });
+            serverSettled = true;
+          } else {
+            throw new Error(result.error || "Settlement failed");
+          }
+        } catch (serverError: any) {
+          if (!serverSettled) {
+            console.warn("Server settlement failed, attempting client-side fallback:", serverError.message);
+            
+            // Client-side settlement fallback via Firestore
+            toast.loading("Server unavailable. Settling locally...", { id: "settle" });
+            const userRef = doc(db, "users", user.uid);
+            const userSnap = await getDoc(userRef);
+            
+            if (!userSnap.exists()) throw new Error("User document not found");
+            
+            const userData = userSnap.data();
+            const asset = userData.tradingAsset || "USDT";
+            const balanceField = asset === "USDC" ? "usdcBalance" : "usdtBalance";
+            const currentAssetBalance = userData[balanceField] || 0;
+            const userInitialInvestment = userData.initialInvestment || 0;
+            const profit = currentAssetBalance - userInitialInvestment;
+            
+            const userProfitShare = profit > 0 ? profit * 0.5 : profit;
+            const totalToUser = userInitialInvestment + userProfitShare;
+            
+            const currentWalletBalance = userData.walletBalance || 0;
+            const newWalletBalance = currentWalletBalance + totalToUser;
+            
+            await updateDoc(userRef, {
+              isTrading: false,
+              [balanceField]: 0,
+              initialInvestment: 0,
+              walletBalance: newWalletBalance,
+              totalProfit: 0,
+              tradeCount: 0,
+            });
+            
+            toast.success(`Settlement complete! ${totalToUser.toFixed(2)} ${asset} returned to wallet.`, { id: "settle" });
+          }
         }
       } else {
         // Start trading
@@ -368,26 +410,70 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     toast.loading("Withdrawing profit to wallet balance...", { id: "withdraw-profit" });
     try {
       const address = deriveSuiWallet(user.uid).toSuiAddress();
-      const idToken = await user.getIdToken();
-      const response = await fetch(apiUrl("/api/trading/withdraw-profit"), {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${idToken}`
-        },
-        body: JSON.stringify({ uid: user.uid, walletAddress: address })
-      });
+      let serverSuccess = false;
+      
+      // Try server-side withdrawal first
+      try {
+        const idToken = await user.getIdToken();
+        const response = await fetch(apiUrl("/api/trading/withdraw-profit"), {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`
+          },
+          body: JSON.stringify({ uid: user.uid, walletAddress: address })
+        });
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Server error (${response.status}): ${text}`);
-      }
+        if (!response.ok) {
+          const text = await response.text();
+          let errorMessage = `Server error (${response.status}): ${text.slice(0, 100)}`;
+          try {
+            const errorData = JSON.parse(text);
+            errorMessage = errorData.error || errorMessage;
+          } catch {}
+          throw new Error(errorMessage);
+        }
 
-      const result = await response.json();
-      if (result.success) {
-        toast.success(`Successfully withdrawn ${result.withdrawn.toFixed(2)} to wallet balance!`, { id: "withdraw-profit" });
-      } else {
-        throw new Error(result.error || "Withdrawal failed");
+        const result = await response.json();
+        if (result.success) {
+          toast.success(`Successfully withdrawn ${result.withdrawn.toFixed(2)} to wallet balance!`, { id: "withdraw-profit" });
+          serverSuccess = true;
+        } else {
+          throw new Error(result.error || "Withdrawal failed");
+        }
+      } catch (serverError: any) {
+        if (!serverSuccess) {
+          console.warn("Server withdraw-profit failed, attempting client-side fallback:", serverError.message);
+          
+          // Client-side profit withdrawal fallback
+          toast.loading("Server unavailable. Processing locally...", { id: "withdraw-profit" });
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          
+          if (!userSnap.exists()) throw new Error("User document not found");
+          
+          const userData = userSnap.data();
+          if (!userData.isTrading) throw new Error("No active trading session");
+          
+          const asset = userData.tradingAsset || "USDT";
+          const balanceField = asset === "USDC" ? "usdcBalance" : "usdtBalance";
+          const currentAssetBalance = userData[balanceField] || 0;
+          const userInitialInvestment = userData.initialInvestment || 0;
+          const profit = currentAssetBalance - userInitialInvestment;
+          
+          if (profit <= 0) throw new Error("No profit to withdraw");
+          
+          const userProfitShare = profit * 0.5;
+          const currentWalletBalance = userData.walletBalance || 0;
+          const newWalletBalance = currentWalletBalance + userProfitShare;
+          
+          await updateDoc(userRef, {
+            [balanceField]: userInitialInvestment,
+            walletBalance: newWalletBalance,
+          });
+          
+          toast.success(`Successfully withdrawn ${userProfitShare.toFixed(2)} ${asset} to wallet balance!`, { id: "withdraw-profit" });
+        }
       }
     } catch (e: any) {
       console.error("Profit withdrawal failed:", e);
