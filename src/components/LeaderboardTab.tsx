@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Trophy, TrendingUp, User, Activity, Medal, Star } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { apiUrl } from "../lib/api";
 
 interface LeaderboardTabProps {
   user: any;
@@ -14,8 +15,7 @@ const LeaderboardTab: React.FC<LeaderboardTabProps> = ({ user }) => {
   useEffect(() => {
     const fetchLeaderboard = async () => {
       try {
-        const API_BASE = import.meta.env.VITE_API_URL || "";
-        const response = await fetch(`${API_BASE}/api/leaderboard`);
+        const response = await fetch(apiUrl("/api/leaderboard"));
         const data = await response.json();
         setTraders(data);
         

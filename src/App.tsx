@@ -15,6 +15,8 @@ import { deriveSuiWallet } from "./lib/sui";
 
 import ErrorBoundary from "./components/ErrorBoundary";
 import { Toaster } from "sonner";
+import { DAppKitProvider } from "@mysten/dapp-kit-react";
+import { dAppKit } from "./lib/dapp-kit";
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(null);
@@ -125,6 +127,7 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
+      <DAppKitProvider dAppKit={dAppKit}>
       <div className="min-h-screen bg-black text-white font-sans selection:bg-orange-500/30">
         <Toaster position="top-center" expand={true} richColors />
         {!user ? (
@@ -203,6 +206,7 @@ const App: React.FC = () => {
         </Layout>
       )}
     </div>
+    </DAppKitProvider>
     </ErrorBoundary>
   );
 };

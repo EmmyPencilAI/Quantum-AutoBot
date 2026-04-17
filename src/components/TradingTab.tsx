@@ -5,7 +5,7 @@ import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Respons
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
 import { deriveSuiWallet, transferOnChain, startSessionOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
-
+import { apiUrl } from "../lib/api";
 import { toast } from "sonner";
 
 interface TradingTabProps {
@@ -109,8 +109,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       toast.loading("Settling trades...", { id: "settle" });
       const address = deriveSuiWallet(user.uid).toSuiAddress();
       const idToken = await user.getIdToken();
-      const API_BASE = import.meta.env.VITE_API_URL || "";
-      const response = await fetch(`${API_BASE}/api/trading/settle`, {
+      const response = await fetch(apiUrl("/api/trading/settle"), {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -275,8 +274,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     try {
       const address = deriveSuiWallet(user.uid).toSuiAddress();
       const idToken = await user.getIdToken();
-      const API_BASE = import.meta.env.VITE_API_URL || "";
-      const response = await fetch(`${API_BASE}/api/trading/withdraw-profit`, {
+      const response = await fetch(apiUrl("/api/trading/withdraw-profit"), {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -317,8 +315,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
       const idToken = await user.getIdToken();
-      const API_BASE = import.meta.env.VITE_API_URL || "";
-      const response = await fetch(`${API_BASE}/api/wallet/withdraw`, {
+      const response = await fetch(apiUrl("/api/wallet/withdraw"), {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
         body: JSON.stringify({ uid: user.uid, amount, asset: withdrawAsset, walletAddress: withdrawAddress })

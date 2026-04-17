@@ -5,7 +5,9 @@ import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, U
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { Bell, CheckCircle2, Info, AlertCircle } from "lucide-react";
-
+import { apiUrl } from "../lib/api";
+import { useCurrentAccount, useDAppKit } from "@mysten/dapp-kit-react";
+import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { toast } from "sonner";
 
 interface WalletTabProps {
@@ -37,10 +39,32 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
   const [copied, setCopied] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [isRequestingGas, setIsRequestingGas] = useState(false);
-  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
-  const [showConnectModal, setShowConnectModal] = useState(false);
-  const [connectWalletAddress, setConnectWalletAddress] = useState("");
-  const [connectingWallet, setConnectingWallet] = useState(false);
+
+  // Real wallet connection via dapp-kit
+  const currentAccount = useCurrentAccount();
+  const dAppKit = useDAppKit();
+  const connectedWallet = currentAccount?.address || null;
+
+  // Sync connected wallet address to Firestore whenever it changes
+  useEffect(() => {
+    if (user && connectedWallet) {
+      const userRef = doc(db, "users", user.uid);
+      updateDoc(userRef, { connectedWallet }).catch(() => {});
+    }
+  }, [user, connectedWallet]);
+
+  const disconnectWallet = async () => {
+    try {
+      await dAppKit.disconnectWallet();
+    } catch(e) {
+      console.warn("Wallet disconnect error", e);
+    }
+    if (user) {
+      const userRef = doc(db, "users", user.uid);
+      updateDoc(userRef, { connectedWallet: null }).catch(() => {});
+    }
+    toast.success("Wallet disconnected.");
+  };
 
   const chains = ["Sui"];
   const assets = ["SUI", "USDT", "USDC"];
@@ -51,14 +75,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       const addr = keypair.toSuiAddress();
       setAddress(addr);
       refreshBalances(addr);
-
-      // Load connected wallet from Firestore
-      const userRef = doc(db, "users", user.uid);
-      getDoc(userRef).then((snap) => {
-        if (snap.exists() && snap.data().connectedWallet) {
-          setConnectedWallet(snap.data().connectedWallet);
-        }
-      });
 
       // Listen for notifications
       const q = query(
@@ -73,37 +89,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       return () => unsubscribe();
     }
   }, [user]);
-
-  const connectExternalWallet = async () => {
-    if (!connectWalletAddress || !connectWalletAddress.startsWith("0x") || connectWalletAddress.length < 20) {
-      toast.error("Please enter a valid SUI wallet address (starting with 0x)");
-      return;
-    }
-    setConnectingWallet(true);
-    try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { connectedWallet: connectWalletAddress });
-      setConnectedWallet(connectWalletAddress);
-      setShowConnectModal(false);
-      setConnectWalletAddress("");
-      toast.success("External wallet connected!");
-    } catch (e: any) {
-      toast.error("Failed to connect wallet: " + e.message);
-    } finally {
-      setConnectingWallet(false);
-    }
-  };
-
-  const disconnectWallet = async () => {
-    try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { connectedWallet: null });
-      setConnectedWallet(null);
-      toast.success("External wallet disconnected.");
-    } catch (e: any) {
-      toast.error("Failed to disconnect: " + e.message);
-    }
-  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(address);
@@ -267,8 +252,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
     toast.loading("Processing withdrawal...", { id: "withdraw" });
     try {
       const idToken = await user.getIdToken();
-      const API_BASE = import.meta.env.VITE_API_URL || "";
-      const response = await fetch(`${API_BASE}/api/wallet/withdraw`, {
+      const response = await fetch(apiUrl("/api/wallet/withdraw"), {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -331,7 +315,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
                   <span className="text-[8px] text-green-400 font-bold uppercase">Connected</span>
                 </div>
               ) : (
-                <p className="text-[10px] md:text-xs text-white/40">Connect your SUI wallet for direct withdrawals</p>
+                <p className="text-[10px] md:text-xs text-white/40">Connect your SUI wallet extension for direct withdrawals</p>
               )}
             </div>
           </div>
@@ -354,13 +338,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
                 </button>
               </>
             ) : (
-              <button
-                onClick={() => setShowConnectModal(true)}
-                className="flex-1 sm:flex-none bg-purple-500 text-white font-bold px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 hover:scale-[1.02] hover:bg-purple-400 transition-all text-xs md:text-sm shadow-lg shadow-purple-500/20"
-              >
-                <Link size={14} />
-                <span>Connect SUI Wallet</span>
-              </button>
+              <ConnectButton />
             )}
           </div>
         </div>
@@ -796,63 +774,6 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
               >
                 Close
               </button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Connect Wallet Modal */}
-      {showConnectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-4 bg-black/90 backdrop-blur-md">
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-5 md:p-8 w-full max-w-md shadow-2xl"
-          >
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 bg-purple-500/10 rounded-2xl flex items-center justify-center">
-                <Link size={24} className="text-purple-400" />
-              </div>
-              <div>
-                <h3 className="text-xl md:text-2xl font-bold">Connect SUI Wallet</h3>
-                <p className="text-xs text-white/40">Paste your external SUI wallet address</p>
-              </div>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="text-[9px] md:text-xs font-bold text-white/40 uppercase mb-2 block">SUI Wallet Address</label>
-                <input
-                  type="text"
-                  placeholder="0x..."
-                  value={connectWalletAddress}
-                  onChange={(e) => setConnectWalletAddress(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-purple-500/50 transition-all font-mono text-sm"
-                />
-                <p className="mt-1.5 text-[9px] text-white/30">This address will be used as the default destination for withdrawals.</p>
-              </div>
-
-              <div className="bg-purple-500/5 border border-purple-500/20 p-3 rounded-xl">
-                <p className="text-[10px] text-purple-300/80 leading-relaxed">
-                  ⓘ Your funds remain non-custodial. Connecting a wallet simply links your on-chain address for convenient withdrawals.
-                </p>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => { setShowConnectModal(false); setConnectWalletAddress(""); }}
-                  className="flex-1 bg-white/5 border border-white/10 py-3 rounded-xl font-bold text-xs md:text-base hover:bg-white/10 transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={connectExternalWallet}
-                  disabled={connectingWallet || !connectWalletAddress}
-                  className="flex-1 bg-purple-500 text-white py-3 rounded-xl font-bold text-xs md:text-base hover:bg-purple-400 transition-all shadow-lg shadow-purple-500/20 disabled:opacity-50"
-                >
-                  {connectingWallet ? "Connecting..." : "Connect Wallet"}
-                </button>
-              </div>
             </div>
           </motion.div>
         </div>

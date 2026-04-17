@@ -3,6 +3,7 @@ import { User, Bell, Shield, Wallet, LogOut, Check, ChevronRight, Camera, Globe,
 import { auth, db } from "../firebase";
 import { updateProfile } from "firebase/auth";
 import { doc, updateDoc } from "firebase/firestore";
+import { apiUrl } from "../lib/api";
 
 interface SettingsTabProps {
   user: any;
@@ -52,8 +53,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ user }) => {
   const checkSystemStatus = async () => {
     setCheckingStatus(true);
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || "";
-      const response = await fetch(`${API_BASE}/api/admin/status`);
+      const response = await fetch(apiUrl("/api/admin/status"));
       const data = await response.json();
       setSystemStatus(data);
     } catch (e) {
