@@ -5,6 +5,6 @@ export const dAppKit = createDAppKit({
   networks: {
     testnet: { url: getFullnodeUrl('testnet') },
     mainnet: { url: getFullnodeUrl('mainnet') },
-  },
+  } as any,
   defaultNetwork: 'testnet',
 });

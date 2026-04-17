@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets } from "lucide-react";
+import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets, Wallet, Link, Unlink } from "lucide-react";
 import { motion } from "motion/react";
 import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
 import { db } from "../firebase";

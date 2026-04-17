@@ -32,6 +32,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [tradingStartedAt, setTradingStartedAt] = useState<string | null>(null);
   const [winRate, setWinRate] = useState(0);
   const [duration, setDuration] = useState("");
+  const [globalActivity, setGlobalActivity] = useState<any[]>([]);
 
   // Computed display values that go to 0 when stopped
   const displayPnl = isTrading ? pnl : 0;
@@ -40,8 +41,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const displayDuration = isTrading ? duration : "--";
   const displayHistory = isTrading ? history : [];
   const displayActivity = isTrading ? globalActivity : [];
-
-
+  const displayRoi = isTrading && initialInvestment > 0 ? (pnl / initialInvestment) * 100 : 0;
   // Sync with Firestore
   useEffect(() => {
     if (!user) return;
@@ -122,8 +122,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     return () => clearInterval(interval);
   }, [isTrading, tradingStartedAt]);
 
-  const [globalActivity, setGlobalActivity] = useState<any[]>([]);
-
   const toggleTrading = async () => {
     if (!user) return;
     setLoading(true);
@@ -166,6 +164,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           setLoading(false);
           return;
         }
+        const userRef = doc(db, "users", user.uid);
         await updateDoc(userRef, {
           isTrading: true,
           activeStrategy: strategy,
