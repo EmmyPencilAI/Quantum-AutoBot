@@ -118,17 +118,12 @@ if (fs.existsSync(firebaseConfigPath)) {
           });
           console.log(`Firebase Admin initialized with service_account credentials for project: ${firebaseConfig.projectId}`);
         } else {
-          // authorized_user or other: use applicationDefault() which handles all types
-          admin.initializeApp({
-            credential: admin.credential.applicationDefault(),
-            projectId: firebaseConfig.projectId,
-          });
-          console.log(`Firebase Admin initialized with applicationDefault (${credType}) for project: ${firebaseConfig.projectId}`);
+          console.log(`ℹ️ Detected '${credType}' credential. Admin SDK requires 'service_account'.`);
+          console.log(`ℹ️ Bypassing server-side Admin DB. Frontend Fallback engine will handle operations securely.`);
+          // By not calling admin.initializeApp, admin.apps.length remains 0 and skips connection attempts
         }
       } catch (e) {
-        console.error("❌ Firebase Admin initialization failed:", e);
-        console.error("   👉 Ensure GOOGLE_CREDENTIALS_JSON is set correctly on Render.");
-        console.error("   👉 Current GOOGLE_APPLICATION_CREDENTIALS:", process.env.GOOGLE_APPLICATION_CREDENTIALS || "NOT SET");
+        console.error("❌ Firebase Admin credential parsing failed:", e);
       }
     }
     
