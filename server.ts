@@ -419,20 +419,22 @@ async function processBackgroundTrades() {
         currentTrend = currentTrend === "Long" ? "Short" : "Long";
       }
 
+      // Trade Frequency: Targeting ~1,500 trades daily
+      const tradeProbability = isAggressive ? 0.087 : 0.05; 
+      const willTrade = Math.random() < tradeProbability;
+      const newTradeCount = (userData.tradeCount || 0) + (willTrade ? 1 : 0);
+
       batch.update(userDoc.ref, {
         [balanceField]: newBalance,
         totalProfit: newTotalProfit,
         allTimeProfit: newAllTimeProfit,
+        tradeCount: newTradeCount,
         lastTradeAt: now,
         currentTrend: currentTrend,
         currentLotSize: currentLotSize
       });
       
-      // Trade Frequency: Targeting ~1,500 trades daily
-      // 86400s / 5s interval = 17280 intervals. 1500 / 17280 = ~0.087 probability
-      const tradeProbability = isAggressive ? 0.087 : 0.05; 
-      
-      if (Math.random() < tradeProbability) {
+      if (willTrade) {
         const tradeRef = db.collection("trades").doc();
         // Trade amount influenced by lot size
         const tradeAmount = currentLotSize * 1000; 

@@ -548,7 +548,7 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
             animate={{ scale: 1, opacity: 1, y: 0 }}
             className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-5 md:p-8 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto scrollbar-hide"
           >
-            <h3 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">Send USDT</h3>
+            <h3 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">Send {sendParams.asset}</h3>
             
             <div className="space-y-4">
               <div>

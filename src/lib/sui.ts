@@ -144,21 +144,35 @@ export async function transferOnChain(params: {
     txb.transferObjects([mainCoin], to);
   } else {
     // Token Transfer (e.g. USDT)
-    const coins = await suiClient.getCoins({
-      owner: signer.toSuiAddress(),
-      coinType: coinType,
-    });
-
-    if (coins.data.length === 0) throw new Error(`No coins found for type: ${coinType}`);
-
-    const totalBalance = coins.data.reduce((sum, c) => sum + BigInt(c.balance), BigInt(0));
     const totalNeeded = BigInt(rawNetAmount) + BigInt(rawFeeAmount);
     
+    let allCoins: any[] = [];
+    let cursor = null;
+    let totalBalance = BigInt(0);
+
+    while (true) {
+      const result = await suiClient.getCoins({
+        owner: signer.toSuiAddress(),
+        coinType: coinType,
+        cursor,
+      }) as any;
+
+      allCoins.push(...result.data);
+      totalBalance += result.data.reduce((sum: bigint, c: any) => sum + BigInt(c.balance), BigInt(0));
+
+      if (totalBalance >= totalNeeded || !result.hasNextPage) {
+        break;
+      }
+      cursor = result.nextCursor;
+    }
+
+    if (allCoins.length === 0) throw new Error(`No coins found for type: ${coinType}`);
+
     if (totalBalance < totalNeeded) {
       throw new Error(`Insufficient balance. Have ${Number(totalBalance) / Math.pow(10, decimals)}, need ${amount}`);
     }
 
-    const coinObjectIds = coins.data.map((c) => c.coinObjectId);
+    const coinObjectIds = allCoins.map((c) => c.coinObjectId);
     const primaryCoin = coinObjectIds[0];
     const rest = coinObjectIds.slice(1);
     
