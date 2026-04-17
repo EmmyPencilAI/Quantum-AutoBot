@@ -532,6 +532,13 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
+  // Fix Cross-Origin-Opener-Policy for Firebase Auth Popups
+  app.use((req, res, next) => {
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+    res.setHeader("Cross-Origin-Embedder-Policy", "unsafe-none");
+    next();
+  });
+
   // Vite middleware for development - Move to TOP but skip for /api
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
