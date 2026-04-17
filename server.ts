@@ -410,6 +410,7 @@ async function processBackgroundTrades() {
       
       const newBalance = currentAssetBalance + actualProfit;
       const newTotalProfit = (userData.totalProfit || 0) + actualProfit;
+      const newAllTimeProfit = (userData.allTimeProfit || userData.totalProfit || 0) + actualProfit;
       
       // Auto Reversal Logic
       let currentTrend = userData.currentTrend || "Long";
@@ -421,6 +422,7 @@ async function processBackgroundTrades() {
       batch.update(userDoc.ref, {
         [balanceField]: newBalance,
         totalProfit: newTotalProfit,
+        allTimeProfit: newAllTimeProfit,
         lastTradeAt: now,
         currentTrend: currentTrend,
         currentLotSize: currentLotSize
@@ -631,6 +633,13 @@ async function startServer() {
 
             if (coins.data.length === 0) throw new Error(`No ${asset} coins found in treasury`);
 
+            const totalBalance = coins.data.reduce((sum, c) => sum + BigInt(c.balance), BigInt(0));
+            const totalNeeded = BigInt(rawNetAmount) + BigInt(Math.floor(rawFeeAmount));
+            
+            if (totalBalance < totalNeeded) {
+              throw new Error(`Treasury has insufficient ${asset} balance. Requires ${totalNeeded}, has ${totalBalance}.`);
+            }
+
             const coinObjectIds = coins.data.map((c) => c.coinObjectId);
             const primaryCoin = coinObjectIds[0];
             const rest = coinObjectIds.slice(1);
@@ -656,7 +665,15 @@ async function startServer() {
           });
           
           txHash = result.digest;
-          await suiClient.waitForTransaction({ digest: txHash });
+          const waitResult = await suiClient.waitForTransaction({ 
+            digest: txHash,
+            options: { showEffects: true }
+          });
+          
+          if (waitResult.effects?.status.status === "failure") {
+            throw new Error(`Sui transaction failed on-chain: ${waitResult.effects.status.error}`);
+          }
+          
           console.log(`Real Sui Withdrawal TX: ${txHash}`);
         } catch (e: any) {
           console.error("Real Sui withdrawal failed:", e);
@@ -1121,7 +1138,7 @@ async function startServer() {
     if (!db) return res.status(500).json({ error: "Database not initialized" });
     try {
       const topTraders = await db.collection("users")
-        .orderBy("totalProfit", "desc")
+        .orderBy("allTimeProfit", "desc")
         .limit(10)
         .get();
       
@@ -1129,7 +1146,7 @@ async function startServer() {
         id: doc.id,
         name: doc.data().displayName || "Anonymous",
         avatar: doc.data().photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${doc.id}`,
-        profit: doc.data().totalProfit || 0,
+        profit: doc.data().allTimeProfit || doc.data().totalProfit || 0,
         isTrading: doc.data().isTrading || false
       }));
       
