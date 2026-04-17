@@ -1,0 +1,38 @@
+Date:   Thu Apr 16 21:29:29 2026 +0100
+@@ -1,5 +1,5 @@
+@@ -20,13 +20,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -42,6 +46,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -70,11 +77,14 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -91,119 +101,76 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+-      toast.error("Action failed: " + (e.message || "Unknown error"), { id: "settle" });
++      toast.error("Stop failed: " + (e.message || "Unknown error"), { id: "settle" });
++      toast.error("Failed to start: " + (e.message || "Unknown error"));
+@@ -216,24 +183,19 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
++          initialInvestment: (initialInvestment || 0) + amount,
++          [balanceField]: (initialInvestment || 0) + amount,
+@@ -243,54 +205,38 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
++          initialInvestment: (initialInvestment || 0) + amount,
++          [balanceField]: (initialInvestment || 0) + amount,
+       toast.error("Funding failed: " + (e.message || "Unknown error"), { id: "fund" });
+@@ -304,12 +250,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+-      alert("Strategy change failed: " + (e.message || "Unknown error"));
+@@ -318,12 +261,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+-      alert("Pair change failed: " + (e.message || "Unknown error"));
+@@ -350,7 +290,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -362,6 +302,44 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -376,19 +354,32 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
++  const tradingBalance = initialInvestment + pnl;
+@@ -411,113 +402,167 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+-            Trading Balance: <span className="text-green-400 font-bold">{(initialInvestment + pnl).toFixed(2)} {tradingAsset}</span>
++          {/* ═══ STEP 4: Trade Summary + Start/Stop ═══ */}
+@@ -525,24 +570,25 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -564,8 +610,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -574,13 +620,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+                   const high = Math.max(open, close) + Math.abs(open - close) * 0.2;
+@@ -599,16 +639,12 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -617,22 +653,16 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -646,11 +676,50 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -704,6 +773,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -731,7 +801,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -751,7 +820,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
+@@ -762,7 +830,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {

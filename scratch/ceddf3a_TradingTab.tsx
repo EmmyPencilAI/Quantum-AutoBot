@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2, ArrowDownLeft, Clock, Trophy, Percent, Hash } from "lucide-react";
+import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, Target, Shield, BarChart2, ArrowDownLeft } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Scatter, Cell, ReferenceLine } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, onSnapshot, updateDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
 import { deriveSuiWallet, transferOnChain, startSessionOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
-import { apiUrl } from "../lib/api";
+
 import { Toaster, toast } from "sonner";
 import { formatNumber } from "../lib/utils";
 
@@ -28,19 +28,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawAddress, setWithdrawAddress] = useState("");
   const [withdrawAsset, setWithdrawAsset] = useState("USDT");
-  const [tradeCount, setTradeCount] = useState(0);
-  const [tradingStartedAt, setTradingStartedAt] = useState<string | null>(null);
-  const [winRate, setWinRate] = useState(0);
-  const [duration, setDuration] = useState("");
-
-  // Computed display values that go to 0 when stopped
-  const displayPnl = isTrading ? pnl : 0;
-  const displayTradeCount = isTrading ? tradeCount : 0;
-  const displayWinRate = isTrading ? winRate : 0;
-  const displayDuration = isTrading ? duration : "--";
-  const displayHistory = isTrading ? history : [];
-  const displayActivity = isTrading ? globalActivity : [];
-
 
   // Sync with Firestore
   useEffect(() => {
@@ -56,8 +43,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         setInitialInvestment(data.initialInvestment || 0);
         setWalletBalance(data.walletBalance || 0);
         setTradingAsset(data.tradingAsset || "USDT");
-        setTradeCount(data.tradeCount || 0);
-        setTradingStartedAt(data.tradingStartedAt || null);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -89,11 +74,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       // If we have trades, use them for the chart. 
       if (userTrades.length > 0) {
         setHistory(userTrades);
-        const wins = userTrades.filter((t: any) => t.pnl >= 0).length;
-        setWinRate((wins / userTrades.length) * 100);
       } else {
         setHistory([{ time: "Start", value: 0 }]);
-        setWinRate(0);
       }
 
       // Also update global activity from the same snapshot to be efficient
@@ -108,32 +90,20 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     };
   }, [user]);
 
-  useEffect(() => {
-    if (!isTrading || !tradingStartedAt) { setDuration("--"); return; }
-    const interval = setInterval(() => {
-      const start = new Date(tradingStartedAt).getTime();
-      const now = Date.now();
-      const diff = now - start;
-      const hours = Math.floor(diff / 3600000);
-      const mins = Math.floor((diff % 3600000) / 60000);
-      const secs = Math.floor((diff % 60000) / 1000);
-      setDuration(`${hours}h ${mins}m ${secs}s`);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isTrading, tradingStartedAt]);
-
   const [globalActivity, setGlobalActivity] = useState<any[]>([]);
 
   const toggleTrading = async () => {
     if (!user) return;
     setLoading(true);
     try {
+      const userRef = doc(db, "users", user.uid);
+      
       if (isTrading) {
         // Settlement logic
         toast.loading("Settling trades on-chain...", { id: "settle" });
         const address = deriveSuiWallet(user.uid).toSuiAddress();
         const idToken = await user.getIdToken();
-        const response = await fetch(apiUrl("/api/trading/settle"), {
+        const response = await fetch("/api/trading/settle", {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
@@ -203,10 +173,9 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     toast.loading("Processing withdrawal...", { id: "withdraw" });
 
     try {
-      const idToken = await user.getIdToken();
-      const response = await fetch(apiUrl("/api/wallet/withdraw"), {
+      const response = await fetch("/api/wallet/withdraw", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           uid: user.uid,
           amount,
@@ -366,7 +335,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     try {
       const address = deriveSuiWallet(user.uid).toSuiAddress();
       const idToken = await user.getIdToken();
-      const response = await fetch(apiUrl("/api/trading/withdraw-profit"), {
+      const response = await fetch("/api/trading/withdraw-profit", {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -393,7 +362,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       setLoading(false);
     }
   };
-
 
   const tradingPairs = [
     { symbol: "BTC / USDT", logo: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
@@ -578,8 +546,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 md:mb-8">
               <div>
                 <p className="text-white/40 text-[9px] md:text-xs font-bold uppercase tracking-widest mb-1">Live Profit/Loss</p>
-                <h3 className={`text-2xl md:text-5xl font-bold tracking-tighter ${displayPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {displayPnl >= 0 ? "+" : ""}{formatNumber(displayPnl, 2)} <span className="text-base md:text-2xl opacity-60">USDT</span>
+                <h3 className={`text-2xl md:text-5xl font-bold tracking-tighter ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {pnl >= 0 ? "+" : ""}{formatNumber(pnl, 2)} <span className="text-base md:text-2xl opacity-60">USDT</span>
                 </h3>
               </div>
               <div className="sm:text-right flex flex-col sm:items-end gap-2">
@@ -597,10 +565,10 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               </div>
             </div>
 
-            {/* Candlestick Chart */}
+            {/* Candlestick Chart Simulation */}
             <div className="h-64 md:h-80 w-full mt-4">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={displayHistory.map((h, i) => {
+                <ComposedChart data={history.map((h, i) => {
                   const prev = history[i-1]?.value || 0;
                   const open = prev;
                   const close = h.value;
@@ -612,6 +580,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                     close,
                     high,
                     low,
+                    // Recharts Bar needs a range [low, high] or [start, end]
+                    // We use [min(open, close), max(open, close)] for the body
                     candle: [Math.min(open, close), Math.max(open, close)],
                     wick: [low, high],
                     isUp: close >= open,
@@ -651,14 +621,14 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                   
                   {/* Wicks */}
                   <Bar dataKey="wick" barSize={2}>
-                    {displayHistory.map((entry, index) => (
+                    {history.map((entry, index) => (
                       <Cell key={`wick-${index}`} fill={entry.pnl >= 0 ? "#4ade80" : "#f87171"} opacity={0.3} />
                     ))}
                   </Bar>
                   
                   {/* Candle Bodies */}
                   <Bar dataKey="candle" barSize={window.innerWidth < 640 ? 4 : 8}>
-                    {displayHistory.map((entry, index) => (
+                    {history.map((entry, index) => (
                       <Cell key={`body-${index}`} fill={entry.pnl >= 0 ? "#4ade80" : "#f87171"} />
                     ))}
                   </Bar>
@@ -682,46 +652,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
-
-            {/* ═══ STATS BAR (ROI / Trades / Win Rate / Duration) ═══ */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t border-white/5">
-              <div className="bg-white/[0.03] rounded-xl p-3 text-center transition-all">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Percent size={12} className={isTrading ? "text-orange-500" : "text-white/30"} />
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">ROI</p>
-                </div>
-                <p className={`text-lg md:text-xl font-bold tracking-tight ${!isTrading ? "text-white/20" : (displayRoi >= 0 ? "text-green-400" : "text-red-400")}`}>
-                  {isTrading && displayRoi >= 0 ? "+" : ""}{displayRoi.toFixed(1)}%
-                </p>
-              </div>
-              <div className="bg-white/[0.03] rounded-xl p-3 text-center transition-all">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Hash size={12} className={isTrading ? "text-blue-500" : "text-white/30"} />
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">Trades</p>
-                </div>
-                <p className={`text-lg md:text-xl font-bold tracking-tight ${isTrading ? "text-white" : "text-white/20"}`}>
-                  {displayTradeCount.toLocaleString()}
-                </p>
-              </div>
-              <div className="bg-white/[0.03] rounded-xl p-3 text-center transition-all">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Trophy size={12} className={isTrading ? "text-yellow-500" : "text-white/30"} />
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">Win Rate</p>
-                </div>
-                <p className={`text-lg md:text-xl font-bold tracking-tight ${isTrading ? "text-green-400" : "text-white/20"}`}>
-                  {displayWinRate.toFixed(1)}%
-                </p>
-              </div>
-              <div className="bg-white/[0.03] rounded-xl p-3 text-center transition-all">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Clock size={12} className={isTrading ? "text-purple-500" : "text-white/30"} />
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-white/30">Duration</p>
-                </div>
-                <p className={`text-sm md:text-base font-bold tracking-tight font-mono ${isTrading ? "text-white/80" : "text-white/20"}`}>
-                  {displayDuration}
-                </p>
-              </div>
-            </div>
           </div>
 
           {/* Trade Activity Feed */}
@@ -737,7 +667,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             </div>
             <div className="space-y-3 md:space-y-4 max-h-[400px] md:max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
               <AnimatePresence>
-                {isTrading && globalActivity.length > 0 ? (
+                {globalActivity.length > 0 ? (
                   globalActivity.map((trade: any) => (
                     <motion.div
                       key={trade.id}
