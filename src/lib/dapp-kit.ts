@@ -1,10 +1,16 @@
 import { createDAppKit } from '@mysten/dapp-kit-react';
-import { getJsonRpcFullnodeUrl as getFullnodeUrl } from '@mysten/sui/jsonRpc';
+import { SuiGraphQLClient } from '@mysten/sui/graphql';
+
+const NETWORKS = {
+  testnet: { url: 'https://sui-testnet.mystenlabs.com/graphql' },
+  mainnet: { url: 'https://sui-mainnet.mystenlabs.com/graphql' },
+};
 
 export const dAppKit = createDAppKit({
-  networks: {
-    testnet: { url: getFullnodeUrl('testnet') },
-    mainnet: { url: getFullnodeUrl('mainnet') },
-  } as any,
+  networks: NETWORKS as any,
   defaultNetwork: 'testnet',
+  createClient: (name: keyof typeof NETWORKS) => new SuiGraphQLClient({
+    url: NETWORKS[name]?.url || NETWORKS.testnet.url,
+    network: name as any,
+  }),
 });

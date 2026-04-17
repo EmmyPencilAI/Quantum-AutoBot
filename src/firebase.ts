@@ -5,11 +5,9 @@ import firebaseConfig from "../firebase-applet-config.json";
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-// Use the named database if provided, otherwise default
 export const db = initializeFirestore(app, {
   localCache: typeof window !== "undefined" ? persistentLocalCache() : undefined,
-  databaseId: (firebaseConfig as any).firestoreDatabaseId || "(default)"
-});
+}, (firebaseConfig as any).firestoreDatabaseId || "(default)");
 
 export const googleProvider = new GoogleAuthProvider();
 export const facebookProvider = new FacebookAuthProvider();

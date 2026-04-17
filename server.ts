@@ -141,11 +141,20 @@ if (fs.existsSync(firebaseConfigPath)) {
         const displayId = targetDbId || "(default)";
         console.log(`Attempting to connect to Firestore Database: ${displayId}`);
         const testDb = getFirestore(adminApp, targetDbId);
-        await testDb.collection("health_check").doc("ping").set({ 
-          lastPing: new Date().toISOString(),
-          projectId: firebaseConfig.projectId,
-          databaseId: displayId
-        });
+        
+        // Timeout to prevent hanging if credentials are wrong and it's trying to reach GCP metadata server
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Timeout connecting to Firestore (Missing credentials locally?)")), 10000)
+        );
+        
+        await Promise.race([
+          testDb.collection("health_check").doc("ping").set({ 
+            lastPing: new Date().toISOString(),
+            projectId: firebaseConfig.projectId,
+            databaseId: displayId
+          }),
+          timeoutPromise
+        ]);
         return testDb;
       };
 
@@ -168,8 +177,9 @@ if (fs.existsSync(firebaseConfigPath)) {
             console.log("Firebase Admin connected successfully to undefined (default) database");
           } catch (e3: any) {
             console.error("Critical: Failed to connect to any Firestore database:", e3.message);
-            // Ultimate fallback to allow the object to exist even if it fails later
-            db = getFirestore(adminApp);
+            console.error("⚠️ Disabling backend firestore operations since credentials are missing or invalid.");
+            // Explicitly set db to null so background jobs don't hang
+            db = null;
           }
         }
       }

@@ -14,7 +14,7 @@ import SettingsTab from "./components/SettingsTab";
 import { deriveSuiWallet } from "./lib/sui";
 
 import ErrorBoundary from "./components/ErrorBoundary";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import { DAppKitProvider } from "@mysten/dapp-kit-react";
 import { dAppKit } from "./lib/dapp-kit";
 
@@ -40,18 +40,26 @@ const App: React.FC = () => {
             
             // Try to get document from server first to ensure connectivity
             let userSnap;
+            let docExists = false;
             try {
               userSnap = await getDoc(userRef);
+              docExists = userSnap.exists();
             } catch (e: any) {
               if (e.message?.includes("offline")) {
                 console.warn("Firestore is offline, trying cache...");
-                userSnap = await getDoc(userRef);
+                try {
+                  userSnap = await getDoc(userRef);
+                  docExists = userSnap.exists();
+                } catch (cacheErr) {
+                  console.warn("Cache read failed too, assuming new user or read forbidden", cacheErr);
+                }
               } else {
-                throw e;
+                console.error("getDoc failed, proceeding with setDoc merge just in case", e);
+                // We'll assume the document doesn't exist and attempt a merge write
               }
             }
             
-            if (!userSnap.exists()) {
+            if (!docExists) {
               console.log("Creating new user profile...");
               const keypair = deriveSuiWallet(user.uid);
               await setDoc(userRef, {
@@ -68,11 +76,14 @@ const App: React.FC = () => {
                 isTrading: false,
                 region: "Global",
                 createdAt: new Date().toISOString(),
-              });
+              }, { merge: true });
             }
             setUser(user);
-          } catch (error) {
+          } catch (error: any) {
             console.error("Firestore operation failed:", error);
+            toast.error(error.message || "Failed to load user profile. Please try again.");
+            auth.signOut();
+            setUser(null);
             handleFirestoreError(error, OperationType.WRITE, path);
           }
         } else {
