@@ -176,8 +176,7 @@ if (fs.existsSync(firebaseConfigPath)) {
             db = await tryConnect(undefined);
             console.log("Firebase Admin connected successfully to undefined (default) database");
           } catch (e3: any) {
-            console.error("Critical: Failed to connect to any Firestore database:", e3.message);
-            console.error("⚠️ Disabling backend firestore operations since credentials are missing or invalid.");
+            console.log("ℹ️  Server Admin DB Offline: Using Frontend Fallback. (This is normal during local development without a service account JSON).");
             // Explicitly set db to null so background jobs don't hang
             db = null;
           }

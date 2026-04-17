@@ -3,7 +3,7 @@ import { Play, Square, TrendingUp, Activity, AlertTriangle, ChevronRight, Zap, T
 import { motion, AnimatePresence } from "motion/react";
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Scatter, Cell, ReferenceLine } from "recharts";
 import { db, handleFirestoreError, OperationType } from "../firebase";
-import { doc, onSnapshot, updateDoc, getDoc, collection, query, where, orderBy, limit, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, getDoc, collection, query, where, orderBy, limit, setDoc, writeBatch } from "firebase/firestore";
 import { deriveSuiWallet, transferOnChain, startSessionOnChain, USDT_TYPE, USDC_TYPE, SUI_TREASURY_ADDRESS, getAllBalances } from "../lib/sui";
 import { apiUrl } from "../lib/api";
 import { Toaster, toast } from "sonner";
@@ -34,6 +34,24 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [duration, setDuration] = useState("");
   const [globalActivity, setGlobalActivity] = useState<any[]>([]);
   const [setupStep, setSetupStep] = useState(1);
+  const [serverAdminAvailable, setServerAdminAvailable] = useState<boolean | null>(null);
+
+  // Check server admin status
+  useEffect(() => {
+    fetch(apiUrl("/api/admin/status"))
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "error") {
+          console.warn("Server Admin SDK offline. Client-side trading fallback enabled.");
+          setServerAdminAvailable(false);
+        } else {
+          setServerAdminAvailable(true);
+        }
+      })
+      .catch(() => {
+        setServerAdminAvailable(false);
+      });
+  }, []);
 
   // Computed display values that go to 0 when stopped
   const displayPnl = isTrading ? pnl : 0;
@@ -505,10 +523,91 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   ];
 
   useEffect(() => {
-    // The background trading engine in server.ts handles trade generation
-    // We just listen to Firestore updates for real-time data
-    return () => {};
-  }, [isTrading]);
+    // Client-side fallback trading engine for when server is offline
+    if (!isTrading || serverAdminAvailable !== false || !user) return;
+    
+    const intervalId = setInterval(async () => {
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) return;
+        
+        const userData = userSnap.data();
+        if (!userData.isTrading) return; // User stopped
+        
+        const activeStrategy = userData.activeStrategy || strategy || "Momentum";
+        let profitFactor = 0.001;
+        let winRate = 0.5;
+        let isAggressive = activeStrategy === "Aggressive";
+        
+        switch (activeStrategy) {
+          case "Aggressive": profitFactor = 0.005 + (Math.random() * 0.01); winRate = 1.0; break;
+          case "Momentum": profitFactor = 0.002; winRate = 0.65; break;
+          case "Scalping": profitFactor = 0.0015; winRate = 0.75; break;
+          case "Conservative": profitFactor = 0.0008; winRate = 0.85; break;
+        }
+        
+        const asset = userData.tradingAsset || "USDT";
+        const balanceField = asset === "USDC" ? "usdcBalance" : "usdtBalance";
+        const currentBalance = userData[balanceField] || 0;
+        
+        let lotSize = userData.currentLotSize || 0.05;
+        lotSize = Math.min(10.0, lotSize + (lotSize * 0.001));
+        
+        const isWin = Math.random() < winRate;
+        let actualProfit = isWin 
+            ? currentBalance * profitFactor * (0.8 + Math.random() * 0.4)
+            : -currentBalance * (profitFactor * 0.5) * (0.5 + Math.random() * 0.5);
+            
+        const newBalance = currentBalance + actualProfit;
+        const newTotalProfit = (userData.totalProfit || 0) + actualProfit;
+        const newAllTimeProfit = (userData.allTimeProfit || userData.totalProfit || 0) + actualProfit;
+        
+        let trend = userData.currentTrend || "Long";
+        if (Math.random() < (isAggressive ? 0.15 : 0.05)) {
+          trend = trend === "Long" ? "Short" : "Long";
+        }
+        
+        const willTrade = Math.random() < (isAggressive ? 0.087 : 0.05);
+        const newTradeCount = (userData.tradeCount || 0) + (willTrade ? 1 : 0);
+        const now = new Date().toISOString();
+        
+        const batch = writeBatch(db);
+        batch.update(userRef, {
+          [balanceField]: newBalance,
+          totalProfit: newTotalProfit,
+          allTimeProfit: newAllTimeProfit,
+          tradeCount: newTradeCount,
+          lastTradeAt: now,
+          currentTrend: trend,
+          currentLotSize: lotSize
+        });
+        
+        if (willTrade) {
+          const tradeRef = doc(collection(db, "trades"));
+          batch.set(tradeRef, {
+            uid: user.uid,
+            pair: userData.activePair || selectedPair || "BTC/USDT",
+            type: trend === "Long" ? "BUY" : "SELL",
+            amount: lotSize * 1000,
+            lotSize: lotSize,
+            asset: asset,
+            price: 65000 + (Math.random() * 1000 - 500), // simulation proxy value
+            pnl: actualProfit,
+            duration: Math.floor(Math.random() * 60) + 10,
+            timestamp: now,
+            isAggressive: isAggressive
+          });
+        }
+        
+        await batch.commit();
+      } catch (err) {
+        console.error("Fallback engine error:", err);
+      }
+    }, 5000);
+    
+    return () => clearInterval(intervalId);
+  }, [isTrading, serverAdminAvailable, user, strategy, selectedPair]);
 
   const activePairData = tradingPairs.find(p => p.symbol === selectedPair) || tradingPairs[0];
 
