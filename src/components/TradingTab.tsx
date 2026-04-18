@@ -60,6 +60,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const displayHistory = isTrading ? history : [];
   const displayActivity = isTrading ? globalActivity : [];
   const displayRoi = isTrading && initialInvestment > 0 ? (pnl / initialInvestment) * 100 : 0;
+
   // Sync with Firestore
   useEffect(() => {
     if (!user) return;
@@ -93,17 +94,17 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       const allTrades = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        time: new Date(doc.data().timestamp).toLocaleString(undefined, { 
-          month: 'short', 
-          day: 'numeric', 
-          hour: '2-digit', 
-          minute: '2-digit' 
+        time: new Date(doc.data().timestamp).toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
         }),
         value: doc.data().pnl
       }));
 
       const userTrades = allTrades.filter((t: any) => t.uid === user.uid).reverse();
-      
+
       // If we have trades, use them for the chart. 
       if (userTrades.length > 0) {
         setHistory(userTrades);
@@ -148,22 +149,22 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         // Settlement logic — STOP TRADING
         toast.loading("Settling trades on-chain...", { id: "settle" });
         const address = deriveSuiWallet(user.uid).toSuiAddress();
-        
+
         // Try server-side settlement first, fall back to client-side if server is unavailable
         let settled = false;
-        
+
         // Attempt 1: Server-side settlement
         try {
           const idToken = await user.getIdToken();
           const response = await fetch(apiUrl("/api/trading/settle"), {
             method: "POST",
-            headers: { 
+            headers: {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${idToken}`
             },
             body: JSON.stringify({ uid: user.uid, walletAddress: address })
           });
-          
+
           if (!response.ok) {
             const text = await response.text();
             console.error("Settlement API error:", text);
@@ -171,7 +172,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             try {
               const errorData = JSON.parse(text);
               errorMessage = errorData.error || errorMessage;
-            } catch {}
+            } catch { }
             throw new Error(errorMessage);
           }
 
@@ -186,29 +187,29 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         } catch (serverError: any) {
           console.warn("Server settlement failed:", serverError.message);
         }
-        
+
         // Attempt 2: Client-side settlement fallback
         if (!settled) {
           try {
             toast.loading("Server unavailable. Settling locally...", { id: "settle" });
             const userRef = doc(db, "users", user.uid);
             const userSnap = await getDoc(userRef);
-            
+
             if (!userSnap.exists()) throw new Error("User document not found");
-            
+
             const userData = userSnap.data();
             const asset = userData.tradingAsset || "USDT";
             const balanceField = asset === "USDC" ? "usdcBalance" : "usdtBalance";
             const currentAssetBalance = userData[balanceField] || 0;
             const userInitialInvestment = userData.initialInvestment || 0;
             const profit = currentAssetBalance - userInitialInvestment;
-            
+
             const userProfitShare = profit > 0 ? profit * 0.5 : profit;
             const totalToUser = Math.max(0, userInitialInvestment + userProfitShare);
-            
+
             const currentWalletBalance = userData.walletBalance || 0;
             const newWalletBalance = currentWalletBalance + totalToUser;
-            
+
             await updateDoc(userRef, {
               isTrading: false,
               [balanceField]: 0,
@@ -220,14 +221,14 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               currentLotSize: 0.05,
               currentTrend: "Long",
             });
-            
+
             settled = true;
             toast.success(`Settlement complete! ${totalToUser.toFixed(2)} ${asset} returned to wallet.`, { id: "settle" });
           } catch (fallbackError: any) {
             console.error("Client-side settlement failed:", fallbackError.message);
           }
         }
-        
+
         // Attempt 3: Emergency stop — just set isTrading to false
         if (!settled) {
           try {
@@ -328,7 +329,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   };
 
   const fundTrading = async () => {
-    if (!user || isTrading) return;
+    // Allows flexibility to fund even if trading (though careful with initialInvestment scaling)
+    if (!user) return;
     const amount = parseFloat(fundAmount);
     if (isNaN(amount) || amount <= 0) {
       toast.error("Please enter a valid amount to fund.");
@@ -344,8 +346,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         const userRef = doc(db, "users", user.uid);
         const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
         await updateDoc(userRef, {
-          isTrading: false,
-          initialInvestment: amount,
+          initialInvestment: initialInvestment + amount,
           [balanceField]: amount,
           walletBalance: walletBalance - amount,
           tradingAsset: tradingAsset,
@@ -357,7 +358,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         // 2. Fund from on-chain (requires transfer to treasury or contract)
         const address = deriveSuiWallet(user.uid).toSuiAddress();
         const balances = await getAllBalances(address);
-        
+
         let currentOnChainBalance = 0;
         if (tradingAsset === "SUI") currentOnChainBalance = balances.sui;
         else if (tradingAsset === "USDC") currentOnChainBalance = balances.usdc;
@@ -399,8 +400,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
         const userRef = doc(db, "users", user.uid);
         const balanceField = tradingAsset === "USDC" ? "usdcBalance" : "usdtBalance";
         await updateDoc(userRef, {
-          isTrading: false,
-          initialInvestment: amount,
+          initialInvestment: initialInvestment + amount,
           [balanceField]: amount,
           tradingAsset: tradingAsset,
           activeStrategy: strategy,
@@ -420,7 +420,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   };
 
   const changeStrategy = async (newStrategy: string) => {
-    if (!user || isTrading) return;
+    if (!user) return; // Removed isTrading restriction for ultimate flexibility
     setStrategy(newStrategy);
     try {
       const userRef = doc(db, "users", user.uid);
@@ -434,7 +434,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   };
 
   const changePair = async (newPair: string) => {
-    if (!user || isTrading) return;
+    if (!user) return; // Removed isTrading restriction for ultimate flexibility
     setSelectedPair(newPair);
     try {
       const userRef = doc(db, "users", user.uid);
@@ -454,13 +454,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     try {
       const address = deriveSuiWallet(user.uid).toSuiAddress();
       let serverSuccess = false;
-      
+
       // Try server-side withdrawal first
       try {
         const idToken = await user.getIdToken();
         const response = await fetch(apiUrl("/api/trading/withdraw-profit"), {
           method: "POST",
-          headers: { 
+          headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${idToken}`
           },
@@ -473,7 +473,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           try {
             const errorData = JSON.parse(text);
             errorMessage = errorData.error || errorMessage;
-          } catch {}
+          } catch { }
           throw new Error(errorMessage);
         }
 
@@ -487,34 +487,34 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       } catch (serverError: any) {
         if (!serverSuccess) {
           console.warn("Server withdraw-profit failed, attempting client-side fallback:", serverError.message);
-          
+
           // Client-side profit withdrawal fallback
           toast.loading("Server unavailable. Processing locally...", { id: "withdraw-profit" });
           const userRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userRef);
-          
+
           if (!userSnap.exists()) throw new Error("User document not found");
-          
+
           const userData = userSnap.data();
           if (!userData.isTrading) throw new Error("No active trading session");
-          
+
           const asset = userData.tradingAsset || "USDT";
           const balanceField = asset === "USDC" ? "usdcBalance" : "usdtBalance";
           const currentAssetBalance = userData[balanceField] || 0;
           const userInitialInvestment = userData.initialInvestment || 0;
           const profit = currentAssetBalance - userInitialInvestment;
-          
+
           if (profit <= 0) throw new Error("No profit to withdraw");
-          
+
           const userProfitShare = profit * 0.5;
           const currentWalletBalance = userData.walletBalance || 0;
           const newWalletBalance = currentWalletBalance + userProfitShare;
-          
+
           await updateDoc(userRef, {
             [balanceField]: userInitialInvestment,
             walletBalance: newWalletBalance,
           });
-          
+
           toast.success(`Successfully withdrawn ${userProfitShare.toFixed(2)} ${asset} to wallet balance!`, { id: "withdraw-profit" });
         }
       }
@@ -525,7 +525,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       setLoading(false);
     }
   };
-
 
   const tradingPairs = [
     { symbol: "BTC / USDT", logo: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png" },
@@ -550,53 +549,53 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   useEffect(() => {
     // Client-side fallback trading engine for when server is offline
     if (!isTrading || serverAdminAvailable !== false || !user) return;
-    
+
     const intervalId = setInterval(async () => {
       try {
         const userRef = doc(db, "users", user.uid);
         const userSnap = await getDoc(userRef);
         if (!userSnap.exists()) return;
-        
+
         const userData = userSnap.data();
         if (!userData.isTrading) return; // User stopped
-        
+
         const activeStrategy = userData.activeStrategy || strategy || "Momentum";
         let profitFactor = 0.001;
         let winRate = 0.5;
         let isAggressive = activeStrategy === "Aggressive";
-        
+
         switch (activeStrategy) {
           case "Aggressive": profitFactor = 0.005 + (Math.random() * 0.01); winRate = 1.0; break;
           case "Momentum": profitFactor = 0.002; winRate = 0.65; break;
           case "Scalping": profitFactor = 0.0015; winRate = 0.75; break;
           case "Conservative": profitFactor = 0.0008; winRate = 0.85; break;
         }
-        
+
         const asset = userData.tradingAsset || "USDT";
         const balanceField = asset === "USDC" ? "usdcBalance" : "usdtBalance";
         const currentBalance = userData[balanceField] || 0;
-        
+
         let lotSize = userData.currentLotSize || 0.05;
         lotSize = Math.min(10.0, lotSize + (lotSize * 0.001));
-        
+
         const isWin = Math.random() < winRate;
-        let actualProfit = isWin 
-            ? currentBalance * profitFactor * (0.8 + Math.random() * 0.4)
-            : -currentBalance * (profitFactor * 0.5) * (0.5 + Math.random() * 0.5);
-            
+        let actualProfit = isWin
+          ? currentBalance * profitFactor * (0.8 + Math.random() * 0.4)
+          : -currentBalance * (profitFactor * 0.5) * (0.5 + Math.random() * 0.5);
+
         const newBalance = currentBalance + actualProfit;
         const newTotalProfit = (userData.totalProfit || 0) + actualProfit;
         const newAllTimeProfit = (userData.allTimeProfit || userData.totalProfit || 0) + actualProfit;
-        
+
         let trend = userData.currentTrend || "Long";
         if (Math.random() < (isAggressive ? 0.15 : 0.05)) {
           trend = trend === "Long" ? "Short" : "Long";
         }
-        
+
         const willTrade = Math.random() < (isAggressive ? 0.087 : 0.05);
         const newTradeCount = (userData.tradeCount || 0) + (willTrade ? 1 : 0);
         const now = new Date().toISOString();
-        
+
         const batch = writeBatch(db);
         batch.update(userRef, {
           [balanceField]: newBalance,
@@ -607,7 +606,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           currentTrend: trend,
           currentLotSize: lotSize
         });
-        
+
         if (willTrade) {
           const tradeRef = doc(collection(db, "trades"));
           batch.set(tradeRef, {
@@ -624,13 +623,13 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             isAggressive: isAggressive
           });
         }
-        
+
         await batch.commit();
       } catch (err) {
         console.error("Fallback engine error:", err);
       }
     }, 5000);
-    
+
     return () => clearInterval(intervalId);
   }, [isTrading, serverAdminAvailable, user, strategy, selectedPair]);
 
@@ -657,169 +656,170 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-        {/* Pair & Strategy Selection */}
+
+        {/* LEFT COLUMN: Setup & Actions (Now Always Visible) */}
         <div className="lg:col-span-1 space-y-4 md:space-y-6">
-          {!isTrading && (
-            <div className="space-y-6">
-              {/* Step 1: Fund Trading Account */}
-              <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">1. Fund Trading Account</h3>
-                  <button 
-                    onClick={() => setShowWithdrawModal(true)}
-                    className="text-[10px] font-bold text-orange-500 hover:underline flex items-center gap-1"
-                  >
-                    Withdraw to On-chain Wallet
-                  </button>
-                </div>
-                
-                <div className="flex gap-2 mb-2">
-                  {["SUI", "USDT", "USDC"].map((asset) => (
-                    <button
-                      key={asset}
-                      onClick={() => setTradingAsset(asset)}
-                      disabled={isTrading || loading}
-                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
-                        tradingAsset === asset
-                          ? "bg-orange-500 border-orange-500 text-black"
-                          : "bg-white/5 border-white/10 text-white/40"
-                      }`}
-                    >
-                      {asset}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    value={fundAmount}
-                    onChange={(e) => setFundAmount(e.target.value)}
-                    disabled={isTrading || loading}
-                    className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-orange-500/50"
-                    placeholder={`Amount (${tradingAsset})`}
-                  />
-                  <button
-                    onClick={fundTrading}
-                    disabled={isTrading || loading}
-                    className="bg-orange-500 text-black px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50 whitespace-nowrap"
-                  >
-                    {loading ? "Processing..." : "Fund"}
-                  </button>
-                </div>
-                <div className="flex justify-between text-[10px] text-white/40">
-                  <p>Wallet: <span className="text-blue-400 font-bold">{formatNumber(walletBalance, 2)} USD</span></p>
-                  <p>Trading: <span className="text-green-400 font-bold">{formatNumber(initialInvestment + pnl, 2)} {tradingAsset}</span></p>
-                </div>
-              </div>
-
-              {/* Step 2: Select Trading Pair */}
-              <div className="space-y-3">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">2. Select Trading Pair</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {tradingPairs.map((pair) => (
-                    <button
-                      key={pair.symbol}
-                      onClick={() => changePair(pair.symbol)}
-                      className={`py-2 px-3 rounded-xl border text-[10px] font-bold transition-all flex items-center gap-2 ${
-                        selectedPair === pair.symbol
-                          ? "bg-orange-500 text-black border-orange-500 shadow-lg shadow-orange-500/20"
-                          : "bg-[#0a0a0a] border-white/10 text-white/60 hover:border-white/20"
-                      }`}
-                    >
-                      <img src={pair.logo} alt={pair.symbol} className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
-                      <span className="truncate">{pair.symbol}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Step 3: Select Strategy */}
-              <div className="space-y-3">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">3. Select Strategy</h3>
-                <div className="space-y-2">
-                  {strategies.map((s) => (
-                    <button
-                      key={s.name}
-                      onClick={() => changeStrategy(s.name)}
-                      className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left w-full ${
-                        strategy === s.name
-                          ? "bg-white/10 border-orange-500 shadow-lg"
-                          : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
-                      }`}
-                    >
-                      <div className={`w-8 h-8 shrink-0 ${s.bg} ${s.color} rounded-lg flex items-center justify-center`}>
-                        <s.icon size={16} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-[10px] uppercase truncate">{s.name}</p>
-                        <p className="text-[8px] text-white/40 leading-tight line-clamp-1">{s.desc}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Review & Start */}
-              <div className="pt-4 border-t border-white/10">
-                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2 mb-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/40 text-[10px] uppercase">Investment</span>
-                    <span className="text-green-400 font-bold text-sm">{formatNumber(initialInvestment, 2)} {tradingAsset}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/40 text-[10px] uppercase">Pair</span>
-                    <span className="text-white font-bold text-sm">{selectedPair}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/40 text-[10px] uppercase">Strategy</span>
-                    <span className="text-orange-500 font-bold text-sm">{strategy}</span>
-                  </div>
-                </div>
-                
+          <div className="space-y-6">
+            {/* Step 1: Fund Trading Account */}
+            <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">1. Fund Trading Account</h3>
                 <button
-                  onClick={toggleTrading}
-                  disabled={loading || initialInvestment <= 0}
-                  className="w-full bg-green-500 text-black py-4 rounded-xl text-lg font-black uppercase hover:scale-[1.02] transition-transform shadow-lg shadow-green-500/20 disabled:opacity-50"
+                  onClick={() => setShowWithdrawModal(true)}
+                  className="text-[10px] font-bold text-orange-500 hover:underline flex items-center gap-1"
                 >
-                  {loading ? "Processing..." : "Start Trading"}
+                  Withdraw to On-chain Wallet
                 </button>
-                {initialInvestment <= 0 && (
-                  <p className="text-[10px] text-red-500/80 text-center mt-2 font-bold animate-pulse">
-                     Must fund trading balance first
-                  </p>
-                )}
+              </div>
+
+              <div className="flex gap-2 mb-2">
+                {["SUI", "USDT", "USDC"].map((asset) => (
+                  <button
+                    key={asset}
+                    onClick={() => setTradingAsset(asset)}
+                    disabled={loading}
+                    className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${tradingAsset === asset
+                        ? "bg-orange-500 border-orange-500 text-black"
+                        : "bg-white/5 border-white/10 text-white/40 hover:bg-white/10"
+                      }`}
+                  >
+                    {asset}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={fundAmount}
+                  onChange={(e) => setFundAmount(e.target.value)}
+                  disabled={loading}
+                  className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-orange-500/50"
+                  placeholder={`Amount (${tradingAsset})`}
+                />
+                <button
+                  onClick={fundTrading}
+                  disabled={loading}
+                  className="bg-orange-500 text-black px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50 whitespace-nowrap"
+                >
+                  {loading ? "Processing..." : "Fund"}
+                </button>
+              </div>
+              <div className="flex justify-between text-[10px] text-white/40">
+                <p>Wallet: <span className="text-blue-400 font-bold">{formatNumber(walletBalance, 2)} USD</span></p>
+                <p>Trading: <span className="text-green-400 font-bold">{formatNumber(initialInvestment + pnl, 2)} {tradingAsset}</span></p>
               </div>
             </div>
-          )}
 
-          {isTrading && (
+            {/* Step 2: Select Trading Pair */}
             <div className="space-y-3">
-              <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-4">
-                <h3 className="text-green-400 font-bold text-sm mb-1">System is Online</h3>
-                <p className="text-white/50 text-xs">The AI engine is currently executing trades based on your selected strategy.</p>
+              <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">2. Select Trading Pair</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {tradingPairs.map((pair) => (
+                  <button
+                    key={pair.symbol}
+                    onClick={() => changePair(pair.symbol)}
+                    className={`py-2 px-3 rounded-xl border text-[10px] font-bold transition-all flex items-center gap-2 ${selectedPair === pair.symbol
+                        ? "bg-orange-500 text-black border-orange-500 shadow-lg shadow-orange-500/20"
+                        : "bg-[#0a0a0a] border-white/10 text-white/60 hover:border-white/20"
+                      }`}
+                  >
+                    <img src={pair.logo} alt={pair.symbol} className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                    <span className="truncate">{pair.symbol}</span>
+                  </button>
+                ))}
               </div>
-              <button
-                onClick={withdrawProfit}
-                disabled={loading || pnl <= 0}
-                className="w-full py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all bg-white/5 border border-white/10 text-white hover:bg-white/10 disabled:opacity-50"
-              >
-                <ArrowDownLeft size={16} />
-                <span>Withdraw Profit to Wallet</span>
-              </button>
+            </div>
+
+            {/* Step 3: Select Strategy */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">3. Select Strategy</h3>
+              <div className="space-y-2">
+                {strategies.map((s) => (
+                  <button
+                    key={s.name}
+                    onClick={() => changeStrategy(s.name)}
+                    className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left w-full ${strategy === s.name
+                        ? "bg-white/10 border-orange-500 shadow-lg"
+                        : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
+                      }`}
+                  >
+                    <div className={`w-8 h-8 shrink-0 ${s.bg} ${s.color} rounded-lg flex items-center justify-center`}>
+                      <s.icon size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-[10px] uppercase truncate">{s.name}</p>
+                      <p className="text-[8px] text-white/40 leading-tight line-clamp-1">{s.desc}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Review & Start */}
+            <div className="pt-4 border-t border-white/10">
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2 mb-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-white/40 text-[10px] uppercase">Investment</span>
+                  <span className="text-green-400 font-bold text-sm">{formatNumber(initialInvestment, 2)} {tradingAsset}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-white/40 text-[10px] uppercase">Pair</span>
+                  <span className="text-white font-bold text-sm">{selectedPair}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-white/40 text-[10px] uppercase">Strategy</span>
+                  <span className="text-orange-500 font-bold text-sm">{strategy}</span>
+                </div>
+              </div>
+
               <button
                 onClick={toggleTrading}
-                disabled={loading}
-                className="w-full py-4 md:py-6 rounded-xl md:rounded-3xl font-bold text-base md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 shadow-xl shadow-red-500/5"
+                disabled={loading || initialInvestment <= 0 || isTrading}
+                className="w-full bg-green-500 text-black py-4 rounded-xl text-lg font-black uppercase hover:scale-[1.02] transition-transform shadow-lg shadow-green-500/20 disabled:opacity-50 disabled:hover:scale-100"
               >
-                <Square size={18} className="md:w-6 md:h-6" fill="currentColor" />
-                <span className="truncate text-sm md:text-lg">{loading ? "Processing..." : "Close Trade (Settle)"}</span>
+                {isTrading ? "System Running" : (loading ? "Processing..." : "Start Trading")}
               </button>
+              {!isTrading && initialInvestment <= 0 && (
+                <p className="text-[10px] text-red-500/80 text-center mt-2 font-bold animate-pulse">
+                  Must fund trading balance first
+                </p>
+              )}
             </div>
-          )}
+          </div>
+
+          {/* Active Trading Controls (Always Visible Layout) */}
+          <div className="space-y-3 pt-4 border-t border-white/10">
+            <div className={`border rounded-2xl p-4 transition-colors ${isTrading ? "bg-green-500/10 border-green-500/20" : "bg-white/5 border-white/10"}`}>
+              <h3 className={`font-bold text-sm mb-1 ${isTrading ? "text-green-400" : "text-white/50"}`}>
+                System is {isTrading ? "Online" : "Offline"}
+              </h3>
+              <p className="text-white/50 text-xs">
+                {isTrading
+                  ? "The AI engine is currently executing trades based on your selected strategy."
+                  : "Start the trading engine to begin automated execution."}
+              </p>
+            </div>
+            <button
+              onClick={withdrawProfit}
+              disabled={loading || pnl <= 0 || !isTrading}
+              className="w-full py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all bg-white/5 border border-white/10 text-white hover:bg-white/10 disabled:opacity-50"
+            >
+              <ArrowDownLeft size={16} />
+              <span>Withdraw Profit to Wallet</span>
+            </button>
+            <button
+              onClick={toggleTrading}
+              disabled={loading || !isTrading}
+              className="w-full py-4 md:py-6 rounded-xl md:rounded-3xl font-bold text-base md:text-xl flex items-center justify-center gap-2 md:gap-3 transition-all bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 shadow-xl shadow-red-500/5 disabled:opacity-50"
+            >
+              <Square size={18} className="md:w-6 md:h-6" fill="currentColor" />
+              <span className="truncate text-sm md:text-lg">{loading ? "Processing..." : "Close Trade (Settle)"}</span>
+            </button>
+          </div>
         </div>
 
-        {/* Live PnL & Activity */}
+        {/* RIGHT COLUMN: Live PnL & Activity */}
         <div className="lg:col-span-2 space-y-4 md:space-y-6">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl md:rounded-3xl p-4 md:p-8 relative overflow-hidden shadow-2xl">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 md:mb-8">
@@ -848,7 +848,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             <div className="h-64 md:h-80 w-full mt-4">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={displayHistory.map((h, i) => {
-                  const prev = history[i-1]?.value || 0;
+                  const prev = history[i - 1]?.value || 0;
                   const open = prev;
                   const close = h.value;
                   const high = Math.max(open, close) + Math.abs(open - close) * 0.2;
@@ -895,14 +895,14 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       return null;
                     }}
                   />
-                  
+
                   {/* Wicks */}
                   <Bar dataKey="wick" barSize={2}>
                     {displayHistory.map((entry, index) => (
                       <Cell key={`wick-${index}`} fill={entry.pnl >= 0 ? "#4ade80" : "#f87171"} opacity={0.3} />
                     ))}
                   </Bar>
-                  
+
                   {/* Candle Bodies */}
                   <Bar dataKey="candle" barSize={window.innerWidth < 640 ? 4 : 8}>
                     {displayHistory.map((entry, index) => (
@@ -1022,6 +1022,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           </div>
         </div>
       </div>
+
       {/* Withdraw Modal */}
       <AnimatePresence>
         {showWithdrawModal && (
@@ -1033,7 +1034,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               className="bg-[#0a0a0a] border border-white/10 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl"
             >
               <h3 className="text-xl md:text-2xl font-bold mb-6">Withdraw to On-chain Wallet</h3>
-              
+
               <div className="space-y-4">
                 <div>
                   <label className="text-xs font-bold uppercase tracking-widest text-white/40 mb-2 block">Select Asset</label>
@@ -1060,7 +1061,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
                       placeholder="0.00"
                       className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white font-bold focus:outline-none focus:border-orange-500/50 transition-all"
                     />
-                    <button 
+                    <button
                       onClick={() => setWithdrawAmount(walletBalance.toString())}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-orange-500 hover:text-orange-400"
                     >
