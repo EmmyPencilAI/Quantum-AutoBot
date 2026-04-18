@@ -617,11 +617,11 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           batch.set(tradeRef, {
             uid: user.uid,
             pair: userData.activePair || selectedPair || "BTC/USDT",
-            type: trend === "Long" ? "BUY" : "SELL",
+            type: trend === "Long" ? "Buy" : "Sell",
             amount: lotSize * 1000,
             lotSize: lotSize,
             asset: asset,
-            price: 65000 + (Math.random() * 1000 - 500), // simulation proxy value
+            price: 65000 + (Math.random() * 1000 - 500),
             pnl: actualProfit,
             duration: Math.floor(Math.random() * 60) + 10,
             timestamp: now,
