@@ -173,30 +173,36 @@ export async function transferOnChain(params: {
     }
 
     const coinObjectIds = allCoins.map((c) => c.coinObjectId);
-    const primaryCoin = coinObjectIds[0];
-    const rest = coinObjectIds.slice(1);
     
-    if (rest.length > 0) {
-      txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
-    }
-
-    if (rawFeeAmount > 0) {
-      const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
-      txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
-    }
-    
-    // Sui rejects splitCoins if you try to split the exact remaining amount.
-    // If the amount needed is exactly the entire totalBalance, just transfer the whole object.
-    if (totalBalance === totalNeeded) {
-      txb.transferObjects([txb.object(primaryCoin)], to);
+    // FAST PATH: If depositing exactly 100% of balance with zero platform fee,
+    // skip arbitrary merge/split constraints and directly transfer objects.
+    if (totalBalance === totalNeeded && rawFeeAmount <= 0) {
+      txb.transferObjects(coinObjectIds.map(id => txb.object(id)), to);
     } else {
-      const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
-      txb.transferObjects([mainCoin], to);
+      // SLOW PATH: Complex partial merge/split
+      const primaryCoin = coinObjectIds[0];
+      const rest = coinObjectIds.slice(1);
+      
+      if (rest.length > 0) {
+        txb.mergeCoins(txb.object(primaryCoin), rest.map(id => txb.object(id)));
+      }
+
+      if (rawFeeAmount > 0) {
+        const [feeCoin] = txb.splitCoins(txb.object(primaryCoin), [rawFeeAmount]);
+        txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
+      }
+      
+      if (totalBalance === totalNeeded) {
+        txb.transferObjects([txb.object(primaryCoin)], to);
+      } else {
+        const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
+        txb.transferObjects([mainCoin], to);
+      }
     }
   }
 
-  // Set a reasonable gas budget
-  txb.setGasBudget(10000000); // 0.01 SUI
+  // Set a robust gas budget to prevent out-of-gas when merging/transferring multiple objects
+  txb.setGasBudget(50000000); // 0.05 SUI
 
   const result = await suiClient.signAndExecuteTransaction({
     signer,
