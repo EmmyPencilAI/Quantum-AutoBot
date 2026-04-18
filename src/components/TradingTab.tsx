@@ -33,7 +33,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
   const [winRate, setWinRate] = useState(0);
   const [duration, setDuration] = useState("");
   const [globalActivity, setGlobalActivity] = useState<any[]>([]);
-  const [setupStep, setSetupStep] = useState(1);
   const [serverAdminAvailable, setServerAdminAvailable] = useState<boolean | null>(null);
 
   // Check server admin status
@@ -264,7 +263,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           timestamp: new Date().toISOString(),
           tradingStartedAt: new Date().toISOString()
         });
-        setSetupStep(1);
         toast.success("Trading engine started!");
       }
     } catch (e: any) {
@@ -354,7 +352,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           activeStrategy: strategy,
           activePair: selectedPair
         });
-        setSetupStep(2);
         toast.success(`Successfully funded ${amount} ${tradingAsset} from wallet!`, { id: "fund" });
       } else {
         // 2. Fund from on-chain (requires transfer to treasury or contract)
@@ -411,7 +408,6 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           tradingSessionId: sessionId // Store the session ID if it exists
         });
 
-        setSetupStep(2);
         toast.success(`Successfully funded ${amount} ${tradingAsset} from on-chain!`, { id: "fund" });
       }
       setFundAmount("0");
@@ -663,167 +659,136 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Pair & Strategy Selection */}
         <div className="lg:col-span-1 space-y-4 md:space-y-6">
-          {!isTrading && setupStep === 1 && (
-            <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">Step 1: Fund Trading Account</h3>
-                <button 
-                  onClick={() => setShowWithdrawModal(true)}
-                  className="text-[10px] font-bold text-orange-500 hover:underline flex items-center gap-1"
-                >
-                  Withdraw to On-chain Wallet
-                </button>
-              </div>
-              
-              <div className="flex gap-2 mb-2">
-                {["SUI", "USDT", "USDC"].map((asset) => (
-                  <button
-                    key={asset}
-                    onClick={() => setTradingAsset(asset)}
+          {!isTrading && (
+            <div className="space-y-6">
+              {/* Step 1: Fund Trading Account */}
+              <div className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">1. Fund Trading Account</h3>
+                  <button 
+                    onClick={() => setShowWithdrawModal(true)}
+                    className="text-[10px] font-bold text-orange-500 hover:underline flex items-center gap-1"
+                  >
+                    Withdraw to On-chain Wallet
+                  </button>
+                </div>
+                
+                <div className="flex gap-2 mb-2">
+                  {["SUI", "USDT", "USDC"].map((asset) => (
+                    <button
+                      key={asset}
+                      onClick={() => setTradingAsset(asset)}
+                      disabled={isTrading || loading}
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                        tradingAsset === asset
+                          ? "bg-orange-500 border-orange-500 text-black"
+                          : "bg-white/5 border-white/10 text-white/40"
+                      }`}
+                    >
+                      {asset}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={fundAmount}
+                    onChange={(e) => setFundAmount(e.target.value)}
                     disabled={isTrading || loading}
-                    className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
-                      tradingAsset === asset
-                        ? "bg-orange-500 border-orange-500 text-black"
-                        : "bg-white/5 border-white/10 text-white/40"
-                    }`}
-                  >
-                    {asset}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  value={fundAmount}
-                  onChange={(e) => setFundAmount(e.target.value)}
-                  disabled={isTrading || loading}
-                  className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-orange-500/50"
-                  placeholder={`Amount (${tradingAsset})`}
-                />
-                <button
-                  onClick={fundTrading}
-                  disabled={isTrading || loading}
-                  className="bg-orange-500 text-black px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50 whitespace-nowrap"
-                >
-                  {loading ? "Processing..." : "Fund"}
-                </button>
-              </div>
-              <p className="text-[10px] text-white/40">
-                Wallet Balance: <span className="text-blue-400 font-bold">{formatNumber(walletBalance, 2)} USD</span>
-              </p>
-              <p className="text-[10px] text-white/40">
-                Trading Balance: <span className="text-green-400 font-bold">{formatNumber(initialInvestment + pnl, 2)} {tradingAsset}</span>
-              </p>
-            </div>
-          )}
-
-          {!isTrading && setupStep === 2 && (
-            <div className="space-y-3 md:space-y-4">
-              <div className="flex items-center justify-between mb-1 md:mb-4">
-                <h3 className="text-sm md:text-lg font-bold tracking-tight text-orange-500">Step 2: Select Trading Pair</h3>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {tradingPairs.map((pair) => (
+                    className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-orange-500/50"
+                    placeholder={`Amount (${tradingAsset})`}
+                  />
                   <button
-                    key={pair.symbol}
-                    onClick={() => changePair(pair.symbol)}
-                    className={`py-2.5 md:py-3 px-3 md:px-4 rounded-xl md:rounded-2xl border text-[10px] md:text-sm font-bold transition-all flex items-center gap-2 ${
-                      selectedPair === pair.symbol
-                        ? "bg-orange-500 text-black border-orange-500 shadow-lg shadow-orange-500/20"
-                        : "bg-[#0a0a0a] border-white/10 text-white/60 hover:border-white/20"
-                    }`}
+                    onClick={fundTrading}
+                    disabled={isTrading || loading}
+                    className="bg-orange-500 text-black px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform disabled:opacity-50 whitespace-nowrap"
                   >
-                    <img src={pair.logo} alt={pair.symbol} className="w-4 h-4 md:w-5 md:h-5 object-contain" referrerPolicy="no-referrer" />
-                    <span className="truncate">{pair.symbol}</span>
+                    {loading ? "Processing..." : "Fund"}
                   </button>
-                ))}
+                </div>
+                <div className="flex justify-between text-[10px] text-white/40">
+                  <p>Wallet: <span className="text-blue-400 font-bold">{formatNumber(walletBalance, 2)} USD</span></p>
+                  <p>Trading: <span className="text-green-400 font-bold">{formatNumber(initialInvestment + pnl, 2)} {tradingAsset}</span></p>
+                </div>
               </div>
-              <button
-                onClick={() => setSetupStep(3)}
-                className="w-full mt-4 bg-orange-500 text-black px-4 py-3 rounded-xl text-sm font-bold hover:scale-[1.02] transition-transform"
-              >
-                Next Step
-              </button>
-            </div>
-          )}
 
-          {!isTrading && setupStep === 3 && (
-            <div className="space-y-3 md:space-y-4">
-              <div className="flex items-center justify-between mb-1 md:mb-4">
-                <h3 className="text-sm md:text-lg font-bold tracking-tight text-orange-500">Step 3: Select Strategy</h3>
+              {/* Step 2: Select Trading Pair */}
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">2. Select Trading Pair</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {tradingPairs.map((pair) => (
+                    <button
+                      key={pair.symbol}
+                      onClick={() => changePair(pair.symbol)}
+                      className={`py-2 px-3 rounded-xl border text-[10px] font-bold transition-all flex items-center gap-2 ${
+                        selectedPair === pair.symbol
+                          ? "bg-orange-500 text-black border-orange-500 shadow-lg shadow-orange-500/20"
+                          : "bg-[#0a0a0a] border-white/10 text-white/60 hover:border-white/20"
+                      }`}
+                    >
+                      <img src={pair.logo} alt={pair.symbol} className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                      <span className="truncate">{pair.symbol}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2 md:gap-4">
-                {strategies.map((s) => (
-                  <button
-                    key={s.name}
-                    onClick={() => changeStrategy(s.name)}
-                    className={`flex items-center gap-3 md:gap-4 p-3 md:p-5 rounded-xl md:rounded-3xl border transition-all text-left ${
-                      strategy === s.name
-                        ? "bg-white/5 border-orange-500 shadow-lg shadow-orange-500/10"
-                        : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
-                    }`}
-                  >
-                    <div className={`w-8 h-8 md:w-12 md:h-12 shrink-0 ${s.bg} ${s.color} rounded-lg md:rounded-2xl flex items-center justify-center`}>
-                      <s.icon size={16} className="md:w-6 md:h-6" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-xs md:text-lg truncate">{s.name}</p>
-                      <p className="text-[8px] md:text-xs text-white/40 leading-tight line-clamp-1 md:line-clamp-2">{s.desc}</p>
-                    </div>
-                    {strategy === s.name && <ChevronRight className="text-orange-500 shrink-0 md:w-4 md:h-4" size={14} />}
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button
-                  onClick={() => setSetupStep(2)}
-                  className="flex-1 bg-white/5 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-white/10 transition-colors"
-                >
-                  Back
-                </button>
-                <button
-                  onClick={() => setSetupStep(4)}
-                  className="flex-[2] bg-orange-500 text-black px-4 py-3 rounded-xl text-sm font-bold hover:scale-[1.02] transition-transform"
-                >
-                  Review Summary
-                </button>
-              </div>
-            </div>
-          )}
 
-          {!isTrading && setupStep === 4 && (
-            <div className="space-y-4">
-              <h3 className="text-sm md:text-lg font-bold tracking-tight text-white mb-2">Trade Summary</h3>
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-xs font-bold uppercase">Investment</span>
-                  <span className="text-green-400 font-bold">{formatNumber(initialInvestment, 2)} {tradingAsset}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-xs font-bold uppercase">Trading Pair</span>
-                  <span className="text-white font-bold">{selectedPair}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-xs font-bold uppercase">Strategy</span>
-                  <span className="text-orange-500 font-bold">{strategy}</span>
+              {/* Step 3: Select Strategy */}
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-orange-500">3. Select Strategy</h3>
+                <div className="space-y-2">
+                  {strategies.map((s) => (
+                    <button
+                      key={s.name}
+                      onClick={() => changeStrategy(s.name)}
+                      className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left w-full ${
+                        strategy === s.name
+                          ? "bg-white/10 border-orange-500 shadow-lg"
+                          : "bg-[#0a0a0a] border-white/10 opacity-60 hover:opacity-100"
+                      }`}
+                    >
+                      <div className={`w-8 h-8 shrink-0 ${s.bg} ${s.color} rounded-lg flex items-center justify-center`}>
+                        <s.icon size={16} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-[10px] uppercase truncate">{s.name}</p>
+                        <p className="text-[8px] text-white/40 leading-tight line-clamp-1">{s.desc}</p>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               </div>
-              
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setSetupStep(3)}
-                  className="flex-1 bg-white/5 text-white px-4 py-4 rounded-xl text-sm font-bold hover:bg-white/10 transition-colors"
-                >
-                  Back
-                </button>
+
+              {/* Review & Start */}
+              <div className="pt-4 border-t border-white/10">
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2 mb-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-white/40 text-[10px] uppercase">Investment</span>
+                    <span className="text-green-400 font-bold text-sm">{formatNumber(initialInvestment, 2)} {tradingAsset}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-white/40 text-[10px] uppercase">Pair</span>
+                    <span className="text-white font-bold text-sm">{selectedPair}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-white/40 text-[10px] uppercase">Strategy</span>
+                    <span className="text-orange-500 font-bold text-sm">{strategy}</span>
+                  </div>
+                </div>
+                
                 <button
                   onClick={toggleTrading}
-                  disabled={loading}
-                  className="flex-[2] bg-green-500 text-black px-4 py-4 rounded-xl text-base md:text-lg font-black uppercase hover:scale-[1.02] transition-transform shadow-lg shadow-green-500/20"
+                  disabled={loading || initialInvestment <= 0}
+                  className="w-full bg-green-500 text-black py-4 rounded-xl text-lg font-black uppercase hover:scale-[1.02] transition-transform shadow-lg shadow-green-500/20 disabled:opacity-50"
                 >
-                  {loading ? "Processing..." : "Start Trade"}
+                  {loading ? "Processing..." : "Start Trading"}
                 </button>
+                {initialInvestment <= 0 && (
+                  <p className="text-[10px] text-red-500/80 text-center mt-2 font-bold animate-pulse">
+                     Must fund trading balance first
+                  </p>
+                )}
               </div>
             </div>
           )}
