@@ -57,34 +57,38 @@ export async function requestTestnetGas(address: string) {
   }
 }
 
-export async function getSuiBalance(address: string) {
+export async function getLiveBalanceAccurate(address: string, coinType: string, decimals: number) {
   try {
-    const balance = await suiClient.getBalance({ owner: address });
-    return Number(balance.totalBalance) / 1e9; // Convert from Mist to SUI
+    let cursor = null;
+    let totalBalance = BigInt(0);
+    while (true) {
+      const result = await suiClient.getCoins({
+        owner: address,
+        coinType: coinType,
+        ...(cursor ? { cursor } : {})
+      }) as any;
+      if (!result || !result.data) break;
+      totalBalance += result.data.reduce((sum: bigint, c: any) => sum + BigInt(c.balance), BigInt(0));
+      if (!result.hasNextPage) break;
+      cursor = result.nextCursor;
+    }
+    return Number(totalBalance) / Math.pow(10, decimals);
   } catch (e) {
-    console.error("Error fetching SUI balance:", e);
+    console.error(`Error sweeping live coins for ${coinType}:`, e);
     return 0;
   }
+}
+
+export async function getSuiBalance(address: string) {
+  return await getLiveBalanceAccurate(address, SUI_TYPE, 9);
 }
 
 export async function getUsdtBalance(address: string) {
-  try {
-    const balance = await suiClient.getBalance({ owner: address, coinType: USDT_TYPE });
-    return Number(balance.totalBalance) / 1e6; // USDT usually has 6 decimals
-  } catch (e) {
-    console.error("Error fetching USDT balance:", e);
-    return 0;
-  }
+  return await getLiveBalanceAccurate(address, USDT_TYPE, 6);
 }
 
 export async function getUsdcBalance(address: string) {
-  try {
-    const balance = await suiClient.getBalance({ owner: address, coinType: USDC_TYPE });
-    return Number(balance.totalBalance) / 1e6; // USDC usually has 6 decimals
-  } catch (e) {
-    console.error("Error fetching USDC balance:", e);
-    return 0;
-  }
+  return await getLiveBalanceAccurate(address, USDC_TYPE, 6);
 }
 
 export async function getAllBalances(address: string) {
@@ -154,7 +158,7 @@ export async function transferOnChain(params: {
       const result = await suiClient.getCoins({
         owner: signer.toSuiAddress(),
         coinType: coinType,
-        cursor,
+        ...(cursor ? { cursor } : {})
       }) as any;
 
       allCoins.push(...result.data);
