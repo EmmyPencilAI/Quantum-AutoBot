@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Copy, Send, ArrowDownLeft, Plus, ExternalLink, ShieldCheck, RefreshCw, TrendingUp, Zap, Droplets, Wallet, Link, Unlink } from "lucide-react";
 import { motion } from "motion/react";
 import { deriveSuiWallet, getAllBalances, crossChainTransfer, transferOnChain, USDT_TYPE, USDC_TYPE, SUI_TYPE, SUI_TREASURY_ADDRESS, requestTestnetGas } from "../lib/sui";
@@ -76,6 +76,18 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       setAddress(addr);
       refreshBalances(addr);
 
+      // Real-time listener for user document (walletBalance updates)
+      const userRef = doc(db, "users", user.uid);
+      const unsubscribeUser = onSnapshot(userRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const newWallet = data.walletBalance || 0;
+          setBalances(prev => ({ ...prev, wallet: newWallet }));
+        }
+      }, (error) => {
+        console.error("WalletTab user listener error:", error);
+      });
+
       // Listen for notifications
       const q = query(
         collection(db, "notifications"),
@@ -83,10 +95,20 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
         orderBy("timestamp", "desc"),
         limit(10)
       );
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+      const unsubscribeNotifs = onSnapshot(q, (snapshot) => {
         setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       });
-      return () => unsubscribe();
+
+      // Periodically refresh on-chain balances (every 30s)
+      const refreshInterval = setInterval(() => {
+        refreshBalances(addr);
+      }, 30000);
+
+      return () => {
+        unsubscribeUser();
+        unsubscribeNotifs();
+        clearInterval(refreshInterval);
+      };
     }
   }, [user]);
 

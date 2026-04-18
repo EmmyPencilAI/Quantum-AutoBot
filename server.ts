@@ -750,6 +750,11 @@ async function startServer() {
         [balanceField]: 0,
         initialInvestment: 0,
         walletBalance: newWalletBalance,
+        totalProfit: 0,
+        tradeCount: 0,
+        tradingStartedAt: null,
+        currentLotSize: 0.05,
+        currentTrend: "Long",
         lastSettlement: {
           amount: totalToUser,
           profit: userProfitShare,

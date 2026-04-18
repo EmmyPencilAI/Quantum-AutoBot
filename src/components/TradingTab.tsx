@@ -146,12 +146,14 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
     setLoading(true);
     try {
       if (isTrading) {
-        // Settlement logic
+        // Settlement logic — STOP TRADING
         toast.loading("Settling trades on-chain...", { id: "settle" });
         const address = deriveSuiWallet(user.uid).toSuiAddress();
         
         // Try server-side settlement first, fall back to client-side if server is unavailable
-        let serverSettled = false;
+        let settled = false;
+        
+        // Attempt 1: Server-side settlement
         try {
           const idToken = await user.getIdToken();
           const response = await fetch(apiUrl("/api/trading/settle"), {
@@ -176,17 +178,19 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
 
           const result = await response.json();
           if (result.success) {
-            console.log("Settlement successful:", result);
+            console.log("Server settlement successful:", result);
             toast.success("Settlement successful! Funds returned to wallet.", { id: "settle" });
-            serverSettled = true;
+            settled = true;
           } else {
             throw new Error(result.error || "Settlement failed");
           }
         } catch (serverError: any) {
-          if (!serverSettled) {
-            console.warn("Server settlement failed, attempting client-side fallback:", serverError.message);
-            
-            // Client-side settlement fallback via Firestore
+          console.warn("Server settlement failed:", serverError.message);
+        }
+        
+        // Attempt 2: Client-side settlement fallback
+        if (!settled) {
+          try {
             toast.loading("Server unavailable. Settling locally...", { id: "settle" });
             const userRef = doc(db, "users", user.uid);
             const userSnap = await getDoc(userRef);
@@ -201,7 +205,7 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
             const profit = currentAssetBalance - userInitialInvestment;
             
             const userProfitShare = profit > 0 ? profit * 0.5 : profit;
-            const totalToUser = userInitialInvestment + userProfitShare;
+            const totalToUser = Math.max(0, userInitialInvestment + userProfitShare);
             
             const currentWalletBalance = userData.walletBalance || 0;
             const newWalletBalance = currentWalletBalance + totalToUser;
@@ -213,9 +217,32 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
               walletBalance: newWalletBalance,
               totalProfit: 0,
               tradeCount: 0,
+              tradingStartedAt: null,
+              currentLotSize: 0.05,
+              currentTrend: "Long",
             });
             
+            settled = true;
             toast.success(`Settlement complete! ${totalToUser.toFixed(2)} ${asset} returned to wallet.`, { id: "settle" });
+          } catch (fallbackError: any) {
+            console.error("Client-side settlement failed:", fallbackError.message);
+          }
+        }
+        
+        // Attempt 3: Emergency stop — just set isTrading to false
+        if (!settled) {
+          try {
+            console.warn("Using emergency stop — forcing isTrading=false");
+            const userRef = doc(db, "users", user.uid);
+            await updateDoc(userRef, {
+              isTrading: false,
+              tradingStartedAt: null,
+            });
+            settled = true;
+            toast.success("Trade stopped (emergency). Please check your balances.", { id: "settle" });
+          } catch (emergencyError: any) {
+            console.error("Emergency stop failed:", emergencyError);
+            toast.error("Failed to stop trade. Please check your connection and try again.", { id: "settle" });
           }
         }
       } else {
@@ -232,6 +259,8 @@ const TradingTab: React.FC<TradingTabProps> = ({ user }) => {
           activePair: selectedPair,
           totalProfit: 0,
           tradeCount: 0,
+          currentLotSize: 0.05,
+          currentTrend: "Long",
           timestamp: new Date().toISOString(),
           tradingStartedAt: new Date().toISOString()
         });
