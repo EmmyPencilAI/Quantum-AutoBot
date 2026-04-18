@@ -118,9 +118,11 @@ if (fs.existsSync(firebaseConfigPath)) {
           });
           console.log(`Firebase Admin initialized with service_account credentials for project: ${firebaseConfig.projectId}`);
         } else {
-          console.log(`ℹ️ Detected '${credType}' credential. Admin SDK requires 'service_account'.`);
-          console.log(`ℹ️ Bypassing server-side Admin DB. Frontend Fallback engine will handle operations securely.`);
-          // By not calling admin.initializeApp, admin.apps.length remains 0 and skips connection attempts
+          console.log(`ℹ️ Detected '${credType}' credential. Initializing via Application Default Credentials.`);
+          admin.initializeApp({
+            projectId: firebaseConfig.projectId,
+          });
+          console.log(`Firebase Admin initialized successfully using ADC for project: ${firebaseConfig.projectId}`);
         }
       } catch (e) {
         console.error("❌ Firebase Admin credential parsing failed:", e);
