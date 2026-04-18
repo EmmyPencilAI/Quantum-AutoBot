@@ -185,8 +185,14 @@ export async function transferOnChain(params: {
       txb.transferObjects([feeCoin], SUI_TREASURY_ADDRESS);
     }
     
-    const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
-    txb.transferObjects([mainCoin], to);
+    // Sui rejects splitCoins if you try to split the exact remaining amount.
+    // If the amount needed is exactly the entire totalBalance, just transfer the whole object.
+    if (totalBalance === totalNeeded) {
+      txb.transferObjects([txb.object(primaryCoin)], to);
+    } else {
+      const [mainCoin] = txb.splitCoins(txb.object(primaryCoin), [rawNetAmount]);
+      txb.transferObjects([mainCoin], to);
+    }
   }
 
   // Set a reasonable gas budget
