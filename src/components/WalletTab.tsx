@@ -252,7 +252,12 @@ const WalletTab: React.FC<WalletTabProps> = ({ user }) => {
       refreshBalances(address);
     } catch (e: any) {
       console.error("Deposit failed:", e);
-      toast.error("Deposit failed: " + (e.message || "Unknown error"), { id: "deposit" });
+      let errorMsg = e.message || e.toString() || "Unknown error";
+      if (typeof e === 'object' && e.cause) {
+        errorMsg += `\nCause: ` + (e.cause.message || JSON.stringify(e.cause));
+      }
+      toast.error("Deposit failed: " + errorMsg, { id: "deposit" });
+      alert("🚨 DEVELOPER ERROR 🚨\nPlease send this EXACT message to your AI assistant:\n\n" + errorMsg);
     } finally {
       setToppingUp(false);
     }
